@@ -1,0 +1,53 @@
+# User-specific configuration
+config/config.py
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# ArcGIS temporary and lock files
+*.lock
+*.sr.lock
+*.gdb/
+*.sde
+
+# Large spatial data
+*.tif
+*.tiff
+*.img
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+
+# FIA and generated tables
+*_TREE.csv
+*_COND.csv
+MU_PLT_CN_Weights.csv
+MU_FVS_Crosswalk.csv
+FVS_StandInit.csv
+FVS_TreeInit.csv
+
+# FVS databases and outputs
+*.db
+*.sqlite
+*.mdb
+*.accdb
+
+# Excel source data
+*.xls
+*.xlsx
+
+# Logs and temporary output
+*.log
+temp/
+scratch/
+outputs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Windows
+Thumbs.db
+Desktop.ini
