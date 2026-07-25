@@ -33,8 +33,20 @@ TreeMap/FIA raster stack produces believable stand-like units before adding
 more complex shape, ownership, and maximum-area controls.
 """
 
+"""
+02_segment_treemap_v3.py
+
+Boundary-vectorized TreeMap stand segmentation for LETO.
+
+Version 3 preserves synchronous cell reassignment but evaluates only boundary
+cells. Segment statistics are computed in linear time with NumPy bincount, and
+neighbor candidates are stored as a compact boundary-cell matrix rather than
+as several full-raster temporary arrays.
+"""
+
 import math
 import os
+import time
 from collections import Counter, defaultdict
 
 import arcpy
@@ -63,47 +75,25 @@ output_folder = os.path.join(
     "TreeMap_Segmentation_Output",
 )
 
-output_gdb = os.path.join(
-    output_folder,
-    "TreeMap_Segmentation.gdb",
-)
-
-segment_raster = os.path.join(
-    output_folder,
-    "TreeMap_Segments_Initial.tif",
-)
-
-segment_polygons = os.path.join(
-    output_gdb,
-    "TreeMap_Segments_Initial",
-)
-
-segment_summary_csv = os.path.join(
-    output_folder,
-    "TreeMap_Segment_Summary.csv",
-)
+output_gdb = os.path.join(output_folder, "TreeMap_Segmentation.gdb")
+segment_raster = os.path.join(output_folder, "TreeMap_Segments_Initial.tif")
+segment_polygons = os.path.join(output_gdb, "TreeMap_Segments_Initial")
+segment_summary_csv = os.path.join(output_folder, "TreeMap_Segment_Summary.csv")
 
 
 # ============================================================
 # SEGMENTATION SETTINGS
 # ============================================================
 
-INITIAL_SEED_ACRES = 20.0
-MIN_STAND_ACRES = 10.0
-MAX_STAND_ACRES = 120.0
+INITIAL_SEED_ACRES = 40.0
+MIN_STAND_ACRES = 5.0
+MAX_STAND_ACRES = 200.0
 
-MAX_ITERATIONS = 20
+MAX_ITERATIONS = 40
 CONVERGENCE_THRESHOLD = 0.001
-
-# A cell can move only if the candidate segment improves the score by at
-# least this amount. A small positive threshold reduces oscillation.
 MINIMUM_SCORE_IMPROVEMENT = 0.01
-
-# Four-neighbor adjacency is preferable for stand delineation because
-# diagonal contact alone should not join two stands.
 USE_EIGHT_NEIGHBORS = False
 
-# Relative importance of each segmentation variable.
 WEIGHTS = {
     "FORTYPCD": 0.30,
     "STDAGE": 0.25,
@@ -112,15 +102,19 @@ WEIGHTS = {
     "TPA": 0.10,
 }
 
-# Small preference for a segment sharing more cell edges with the candidate
-# cell. This encourages smoother boundaries.
-SHARED_EDGE_BONUS = 0.05
-
-# Continuous-variable outlier clipping after standardization.
+SHARED_EDGE_BONUS = 0.1
 Z_CLIP = 4.0
-
-# Raster NoData sentinel used when reading arrays.
 READ_NODATA = -999999
+
+# Print a progress message during long vectorized stages.
+REPORT_TIMING = True
+
+# Optional post-processing merge for biologically similar adjacent stands.
+MERGE_SIMILAR_STANDS = True
+SIMILAR_MERGE_MAX_AGE_DIFFERENCE = 10.0  # years
+SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = True
+SIMILAR_MERGE_MIN_SHARED_EDGES = 1
+SIMILAR_MERGE_MAX_PASSES = 50
 
 
 # ============================================================
@@ -128,14 +122,10 @@ READ_NODATA = -999999
 # ============================================================
 
 arcpy.env.overwriteOutput = True
-
 os.makedirs(output_folder, exist_ok=True)
 
 if not arcpy.Exists(output_gdb):
-    arcpy.management.CreateFileGDB(
-        output_folder,
-        os.path.basename(output_gdb),
-    )
+    arcpy.management.CreateFileGDB(output_folder, os.path.basename(output_gdb))
 
 
 # ============================================================
@@ -143,36 +133,36 @@ if not arcpy.Exists(output_gdb):
 # ============================================================
 
 def message(text):
-    print(text)
+    print(text, flush=True)
     try:
         arcpy.AddMessage(text)
     except Exception:
         pass
 
 
-def validate_inputs():
-    missing = [
-        path
-        for path in [
-            age_raster,
-            forest_type_raster,
-            basal_area_raster,
-            qmd_raster,
-            tpa_raster,
-        ]
-        if not arcpy.Exists(path)
-    ]
+def timed_message(label, start_time):
+    if REPORT_TIMING:
+        elapsed = time.perf_counter() - start_time
+        message(f"{label} completed in {elapsed:,.1f} seconds")
 
+
+def validate_inputs():
+    paths = [
+        age_raster,
+        forest_type_raster,
+        basal_area_raster,
+        qmd_raster,
+        tpa_raster,
+    ]
+    missing = [path for path in paths if not arcpy.Exists(path)]
     if missing:
         raise FileNotFoundError(
-            "The following input rasters were not found:\n"
-            + "\n".join(missing)
+            "The following input rasters were not found:\n" + "\n".join(missing)
         )
 
 
 def raster_geometry(raster_path):
     desc = arcpy.Describe(raster_path)
-
     return {
         "rows": int(desc.height),
         "cols": int(desc.width),
@@ -188,378 +178,315 @@ def raster_geometry(raster_path):
 
 def validate_alignment(reference_path, other_paths):
     reference = raster_geometry(reference_path)
-
     for raster_path in other_paths:
         current = raster_geometry(raster_path)
-
         checks = [
             reference["rows"] == current["rows"],
             reference["cols"] == current["cols"],
-            math.isclose(
-                reference["cell_width"],
-                current["cell_width"],
-                rel_tol=0,
-                abs_tol=1e-8,
-            ),
-            math.isclose(
-                reference["cell_height"],
-                current["cell_height"],
-                rel_tol=0,
-                abs_tol=1e-8,
-            ),
-            math.isclose(
-                reference["xmin"],
-                current["xmin"],
-                rel_tol=0,
-                abs_tol=1e-6,
-            ),
-            math.isclose(
-                reference["ymin"],
-                current["ymin"],
-                rel_tol=0,
-                abs_tol=1e-6,
-            ),
+            math.isclose(reference["cell_width"], current["cell_width"], rel_tol=0, abs_tol=1e-8),
+            math.isclose(reference["cell_height"], current["cell_height"], rel_tol=0, abs_tol=1e-8),
+            math.isclose(reference["xmin"], current["xmin"], rel_tol=0, abs_tol=1e-6),
+            math.isclose(reference["ymin"], current["ymin"], rel_tol=0, abs_tol=1e-6),
         ]
-
         if not all(checks):
-            raise ValueError(
-                f"Raster is not aligned with the reference raster:\n"
-                f"{raster_path}"
-            )
-
+            raise ValueError(f"Raster is not aligned with the reference raster:\n{raster_path}")
     return reference
 
 
 def read_raster(path, scale=1.0):
-    array = arcpy.RasterToNumPyArray(
-        path,
-        nodata_to_value=READ_NODATA,
-    ).astype(np.float64)
-
+    array = arcpy.RasterToNumPyArray(path, nodata_to_value=READ_NODATA).astype(np.float32)
     array[array == READ_NODATA] = np.nan
-
     if scale != 1.0:
-        array /= scale
-
+        array /= np.float32(scale)
     return array
 
 
 def robust_standardize(array, valid_mask):
-    """
-    Standardize with median and interquartile range.
-
-    This is less sensitive than mean/standard deviation to unusually dense
-    FIA plots with very high TPA or basal area.
-    """
     values = array[valid_mask]
-
     median = float(np.nanmedian(values))
     q1 = float(np.nanpercentile(values, 25))
     q3 = float(np.nanpercentile(values, 75))
     iqr = q3 - q1
-
-    # Fall back to standard deviation if the IQR is zero.
-    if not np.isfinite(iqr) or iqr == 0:
-        scale = float(np.nanstd(values))
-    else:
-        scale = iqr / 1.349
-
+    scale = float(np.nanstd(values)) if not np.isfinite(iqr) or iqr == 0 else iqr / 1.349
     if not np.isfinite(scale) or scale == 0:
         scale = 1.0
-
-    standardized = (array - median) / scale
-    standardized = np.clip(standardized, -Z_CLIP, Z_CLIP)
-
+    standardized = ((array - median) / scale).astype(np.float32)
+    np.clip(standardized, -Z_CLIP, Z_CLIP, out=standardized)
     return standardized, median, scale
 
 
-def neighbor_offsets():
-    if USE_EIGHT_NEIGHBORS:
-        return [
-            (-1, -1), (-1, 0), (-1, 1),
-            (0, -1),           (0, 1),
-            (1, -1),  (1, 0),  (1, 1),
-        ]
+def connectivity_structure():
+    return np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.int8)
 
-    return [
+
+def create_initial_segments(valid_mask, cells_per_seed):
+    rows, cols = valid_mask.shape
+    block_side = max(1, int(round(math.sqrt(cells_per_seed))))
+    labels = np.zeros((rows, cols), dtype=np.int32)
+    next_id = 1
+    structure = connectivity_structure()
+
+    for row_start in range(0, rows, block_side):
+        row_end = min(rows, row_start + block_side)
+        for col_start in range(0, cols, block_side):
+            col_end = min(cols, col_start + block_side)
+            block_mask = valid_mask[row_start:row_end, col_start:col_end]
+            if not np.any(block_mask):
+                continue
+            local_labels, component_count = ndimage.label(block_mask, structure=structure)
+            target = labels[row_start:row_end, col_start:col_end]
+            positive = local_labels > 0
+            target[positive] = local_labels[positive] + next_id - 1
+            next_id += component_count
+
+    return labels
+
+
+# ============================================================
+# FAST SEGMENT STATISTICS
+# ============================================================
+
+def segment_statistics_arrays(labels, feature_arrays, forest_type):
+    """Return segment statistics as arrays indexed directly by segment ID."""
+    valid = labels > 0
+    ids = labels[valid].astype(np.int64, copy=False)
+    max_id = int(ids.max()) if ids.size else 0
+
+    counts = np.bincount(ids, minlength=max_id + 1).astype(np.int64)
+    means = {}
+
+    for name, array in feature_arrays.items():
+        values = array[valid].astype(np.float64, copy=False)
+        sums = np.bincount(ids, weights=values, minlength=max_id + 1)
+        means[name] = np.divide(
+            sums,
+            counts,
+            out=np.zeros(max_id + 1, dtype=np.float64),
+            where=counts > 0,
+        )
+
+    types = forest_type[valid].astype(np.int64, copy=False)
+    unique_types, compact_types = np.unique(types, return_inverse=True)
+    n_types = len(unique_types)
+
+    if n_types:
+        combined = ids * n_types + compact_types
+        pair_counts = np.bincount(
+            combined,
+            minlength=(max_id + 1) * n_types,
+        ).reshape(max_id + 1, n_types)
+        dominant_index = np.argmax(pair_counts, axis=1)
+        dominant_type = unique_types[dominant_index].astype(np.int32)
+        dominant_count = pair_counts[np.arange(max_id + 1), dominant_index].astype(np.int64)
+    else:
+        dominant_type = np.zeros(max_id + 1, dtype=np.int32)
+        dominant_count = np.zeros(max_id + 1, dtype=np.int64)
+
+    return {
+        "counts": counts,
+        "means": means,
+        "dominant_type": dominant_type,
+        "dominant_count": dominant_count,
+    }
+
+
+def identify_boundary_cells(labels, valid_mask):
+    boundary = np.zeros(labels.shape, dtype=bool)
+    boundary[:-1, :] |= valid_mask[:-1, :] & valid_mask[1:, :] & (labels[:-1, :] != labels[1:, :])
+    boundary[1:, :] |= valid_mask[1:, :] & valid_mask[:-1, :] & (labels[1:, :] != labels[:-1, :])
+    boundary[:, :-1] |= valid_mask[:, :-1] & valid_mask[:, 1:] & (labels[:, :-1] != labels[:, 1:])
+    boundary[:, 1:] |= valid_mask[:, 1:] & valid_mask[:, :-1] & (labels[:, 1:] != labels[:, :-1])
+    return boundary
+
+
+def boundary_neighbor_matrix(labels, boundary_rows, boundary_cols):
+    """
+    Return adjacent segment IDs for boundary cells only.
+
+    Shape is (number of boundary cells, number of neighbor directions). This
+    avoids constructing four or eight complete shifted rasters each iteration.
+    """
+    rows, cols = labels.shape
+
+    offsets = [
         (-1, 0),
         (0, -1),
         (0, 1),
         (1, 0),
     ]
 
+    if USE_EIGHT_NEIGHBORS:
+        offsets = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),            (0, 1),
+            (1, -1),  (1, 0),   (1, 1),
+        ]
 
-def create_initial_segments(valid_mask, cells_per_seed):
-    """
-    Create regular square block seeds, while preserving raster gaps.
-    """
-    rows, cols = valid_mask.shape
-    block_side = max(1, int(round(math.sqrt(cells_per_seed))))
+    neighbors = np.zeros(
+        (boundary_rows.size, len(offsets)),
+        dtype=np.int32,
+    )
 
-    labels = np.zeros((rows, cols), dtype=np.int32)
-    next_id = 1
+    for index, (dr, dc) in enumerate(offsets):
+        rr = boundary_rows + dr
+        cc = boundary_cols + dc
+        inside = (
+            (rr >= 0)
+            & (rr < rows)
+            & (cc >= 0)
+            & (cc < cols)
+        )
+        neighbors[inside, index] = labels[rr[inside], cc[inside]]
 
-    for row_start in range(0, rows, block_side):
-        row_end = min(rows, row_start + block_side)
-
-        for col_start in range(0, cols, block_side):
-            col_end = min(cols, col_start + block_side)
-
-            block_mask = valid_mask[
-                row_start:row_end,
-                col_start:col_end,
-            ]
-
-            if not np.any(block_mask):
-                continue
-
-            # A block can contain several disconnected forest pieces because
-            # roads and water appear as NoData. Give each piece its own ID.
-            local_labels, component_count = ndimage.label(
-                block_mask,
-                structure=np.array(
-                    [
-                        [0, 1, 0],
-                        [1, 1, 1],
-                        [0, 1, 0],
-                    ],
-                    dtype=np.int8,
-                ),
-            )
-
-            target = labels[
-                row_start:row_end,
-                col_start:col_end,
-            ]
-
-            for component_id in range(1, component_count + 1):
-                target[local_labels == component_id] = next_id
-                next_id += 1
-
-    return labels
+    return neighbors
 
 
-def segment_statistics(labels, feature_arrays, forest_type):
-    """
-    Calculate continuous means and dominant forest type for every segment.
-    """
-    segment_ids = np.unique(labels)
-    segment_ids = segment_ids[segment_ids > 0]
-
-    stats = {}
-
-    for segment_id in segment_ids:
-        mask = labels == segment_id
-        pixel_count = int(mask.sum())
-
-        record = {
-            "PIXEL_COUNT": pixel_count,
-        }
-
-        for name, array in feature_arrays.items():
-            record[name] = float(np.nanmean(array[mask]))
-
-        types = forest_type[mask]
-        types = types[np.isfinite(types)]
-
-        if len(types):
-            type_counts = Counter(types.astype(np.int32))
-            dominant_type, dominant_count = type_counts.most_common(1)[0]
-            record["FORTYPCD"] = int(dominant_type)
-            record["FORTYPE_COUNT"] = int(dominant_count)
-        else:
-            record["FORTYPCD"] = None
-            record["FORTYPE_COUNT"] = 0
-
-        stats[int(segment_id)] = record
-
-    return stats
-
-
-def candidate_segments(labels, row, col, offsets):
-    rows, cols = labels.shape
-    counts = Counter()
-
-    for dr, dc in offsets:
-        rr = row + dr
-        cc = col + dc
-
-        if rr < 0 or rr >= rows or cc < 0 or cc >= cols:
-            continue
-
-        candidate = int(labels[rr, cc])
-
-        if candidate > 0:
-            counts[candidate] += 1
-
-    return counts
-
-
-def assignment_cost(
-    row,
-    col,
-    candidate_id,
-    candidate_edge_count,
+def assignment_cost_vector(
+    candidate_ids,
+    edge_counts,
     stats,
-    feature_arrays,
-    forest_type,
+    cell_features,
+    cell_forest_type,
 ):
-    candidate = stats[candidate_id]
-
-    cost = 0.0
+    """Calculate assignment cost for a vector of boundary-cell candidates."""
+    cost = np.zeros(candidate_ids.size, dtype=np.float64)
+    means = stats["means"]
 
     for name in ["STDAGE", "BALIVE", "QMD", "TPA"]:
-        difference = (
-            feature_arrays[name][row, col]
-            - candidate[name]
-        )
-
+        difference = cell_features[name] - means[name][candidate_ids]
         cost += WEIGHTS[name] * difference * difference
 
-    cell_type = int(forest_type[row, col])
-    type_penalty = (
-        0.0
-        if candidate["FORTYPCD"] == cell_type
-        else WEIGHTS["FORTYPCD"]
+    cost += np.where(
+        stats["dominant_type"][candidate_ids] == cell_forest_type,
+        0.0,
+        WEIGHTS["FORTYPCD"],
     )
+    cost -= SHARED_EDGE_BONUS * edge_counts
 
-    cost += type_penalty
-
-    # Lower cost for candidates sharing more edges with the cell.
-    cost -= SHARED_EDGE_BONUS * candidate_edge_count
-
-    return float(cost)
+    return cost
 
 
-def identify_boundary_cells(labels, valid_mask):
+def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type):
     """
-    Return a Boolean mask identifying cells touching a different segment.
+    Synchronously reassign all boundary cells using compact vector arrays.
+
+    The Python loop is over neighbor directions (four or eight), not over
+    individual cells. Every candidate direction is evaluated for all boundary
+    cells simultaneously using NumPy array operations.
     """
-    boundary = np.zeros(labels.shape, dtype=bool)
-
-    boundary[:-1, :] |= (
-        valid_mask[:-1, :]
-        & valid_mask[1:, :]
-        & (labels[:-1, :] != labels[1:, :])
-    )
-    boundary[1:, :] |= (
-        valid_mask[1:, :]
-        & valid_mask[:-1, :]
-        & (labels[1:, :] != labels[:-1, :])
-    )
-    boundary[:, :-1] |= (
-        valid_mask[:, :-1]
-        & valid_mask[:, 1:]
-        & (labels[:, :-1] != labels[:, 1:])
-    )
-    boundary[:, 1:] |= (
-        valid_mask[:, 1:]
-        & valid_mask[:, :-1]
-        & (labels[:, 1:] != labels[:, :-1])
-    )
-
-    return boundary
-
-
-def iterative_reassignment(
-    labels,
-    valid_mask,
-    feature_arrays,
-    forest_type,
-):
-    """
-    Reassign boundary cells using synchronous updates.
-
-    Synchronous updating makes the result less dependent on traversal order.
-    """
-    offsets = neighbor_offsets()
     total_valid_cells = int(valid_mask.sum())
+    forest_type_int = np.where(valid_mask, forest_type, 0).astype(np.int32)
 
     for iteration in range(1, MAX_ITERATIONS + 1):
-        stats = segment_statistics(
+        iteration_start = time.perf_counter()
+
+        # O(number of valid cells), rather than one raster scan per segment.
+        stats = segment_statistics_arrays(
             labels,
             feature_arrays,
-            forest_type,
+            forest_type_int,
         )
 
-        boundary_mask = identify_boundary_cells(
+        boundary = identify_boundary_cells(labels, valid_mask)
+        boundary_rows, boundary_cols = np.where(boundary)
+        boundary_count = boundary_rows.size
+
+        if boundary_count == 0:
+            message("No segment boundaries remain.")
+            break
+
+        current_ids = labels[boundary_rows, boundary_cols]
+        neighbor_ids = boundary_neighbor_matrix(
             labels,
-            valid_mask,
+            boundary_rows,
+            boundary_cols,
         )
 
-        boundary_rows, boundary_cols = np.where(boundary_mask)
+        # Values are extracted only for boundary cells.
+        cell_features = {
+            name: array[boundary_rows, boundary_cols].astype(
+                np.float64,
+                copy=False,
+            )
+            for name, array in feature_arrays.items()
+        }
+        cell_forest_type = forest_type_int[
+            boundary_rows,
+            boundary_cols,
+        ]
 
-        new_labels = labels.copy()
-        changed = 0
+        current_edge_counts = np.sum(
+            neighbor_ids == current_ids[:, None],
+            axis=1,
+        ).astype(np.float64)
 
-        for row, col in zip(boundary_rows, boundary_cols):
-            current_id = int(labels[row, col])
+        best_ids = current_ids.copy()
+        best_cost = assignment_cost_vector(
+            current_ids,
+            current_edge_counts,
+            stats,
+            cell_features,
+            cell_forest_type,
+        )
 
-            candidates = candidate_segments(
-                labels,
-                row,
-                col,
-                offsets,
+        # Only four iterations for rook adjacency, regardless of the number
+        # of boundary cells.
+        for direction in range(neighbor_ids.shape[1]):
+            candidate_ids = neighbor_ids[:, direction]
+            candidate_valid = (
+                (candidate_ids > 0)
+                & (candidate_ids != current_ids)
             )
 
-            if not candidates:
+            if not np.any(candidate_valid):
                 continue
 
-            # Include the current segment even if none of the sampled
-            # neighbors happens to have the current ID.
-            if current_id not in candidates:
-                candidates[current_id] = 0
+            candidate_edge_counts = np.sum(
+                neighbor_ids == candidate_ids[:, None],
+                axis=1,
+            ).astype(np.float64)
 
-            current_cost = assignment_cost(
-                row,
-                col,
-                current_id,
-                candidates[current_id],
+            candidate_cost = assignment_cost_vector(
+                candidate_ids,
+                candidate_edge_counts,
                 stats,
-                feature_arrays,
-                forest_type,
+                cell_features,
+                cell_forest_type,
             )
 
-            best_id = current_id
-            best_cost = current_cost
+            improve = candidate_valid & (
+                candidate_cost
+                < best_cost - MINIMUM_SCORE_IMPROVEMENT
+            )
 
-            for candidate_id, edge_count in candidates.items():
-                if candidate_id == current_id:
-                    continue
+            best_cost[improve] = candidate_cost[improve]
+            best_ids[improve] = candidate_ids[improve]
 
-                candidate_cost = assignment_cost(
-                    row,
-                    col,
-                    candidate_id,
-                    edge_count,
-                    stats,
-                    feature_arrays,
-                    forest_type,
-                )
+        changed_mask = best_ids != current_ids
+        changed = int(changed_mask.sum())
 
-                if (
-                    candidate_cost
-                    < best_cost - MINIMUM_SCORE_IMPROVEMENT
-                ):
-                    best_cost = candidate_cost
-                    best_id = candidate_id
-
-            if best_id != current_id:
-                new_labels[row, col] = best_id
-                changed += 1
-
-        labels = new_labels
+        # Synchronous update: all decisions used the same original labels.
+        if changed:
+            new_labels = labels.copy()
+            new_labels[
+                boundary_rows[changed_mask],
+                boundary_cols[changed_mask],
+            ] = best_ids[changed_mask]
+            labels = new_labels
 
         changed_fraction = (
             changed / total_valid_cells
             if total_valid_cells
             else 0.0
         )
+        elapsed = time.perf_counter() - iteration_start
 
         message(
             f"Iteration {iteration:02d}: "
-            f"{changed:,} cells changed "
-            f"({changed_fraction:.4%})"
+            f"{boundary_count:,} boundary cells, "
+            f"{changed:,} changed "
+            f"({changed_fraction:.4%}), "
+            f"{elapsed:,.1f} seconds"
         )
 
         if changed_fraction <= CONVERGENCE_THRESHOLD:
@@ -569,216 +496,87 @@ def iterative_reassignment(
     return labels
 
 
+# ============================================================
+# CONNECTIVITY AND ID MANAGEMENT
+# ============================================================
+
 def split_disconnected_segments(labels):
-    """
-    Ensure every segment ID represents one four-neighbor-connected region.
-    """
-    output = np.zeros(labels.shape, dtype=np.int32)
+    """Split disconnected pieces using per-segment bounding boxes, not full rasters."""
+    output = np.zeros_like(labels, dtype=np.int32)
+    max_id = int(labels.max())
+    if max_id == 0:
+        return output
+
+    slices = ndimage.find_objects(labels, max_label=max_id)
+    structure = connectivity_structure()
     next_id = 1
 
-    structure = np.array(
-        [
-            [0, 1, 0],
-            [1, 1, 1],
-            [0, 1, 0],
-        ],
-        dtype=np.int8,
-    )
-
-    for old_id in np.unique(labels):
-        if old_id <= 0:
+    for old_id, bbox in enumerate(slices, start=1):
+        if bbox is None:
             continue
-
-        pieces, piece_count = ndimage.label(
-            labels == old_id,
-            structure=structure,
-        )
-
-        for piece_id in range(1, piece_count + 1):
-            output[pieces == piece_id] = next_id
-            next_id += 1
+        local = labels[bbox]
+        local_mask = local == old_id
+        pieces, piece_count = ndimage.label(local_mask, structure=structure)
+        target = output[bbox]
+        positive = pieces > 0
+        target[positive] = pieces[positive] + next_id - 1
+        next_id += piece_count
 
     return output
-
-
-def segment_adjacency(labels):
-    """
-    Return shared-edge counts for each adjacent segment pair.
-    """
-    adjacency = defaultdict(Counter)
-
-    left = labels[:, :-1]
-    right = labels[:, 1:]
-
-    mask = (
-        (left > 0)
-        & (right > 0)
-        & (left != right)
-    )
-
-    for first, second in zip(left[mask], right[mask]):
-        first = int(first)
-        second = int(second)
-        adjacency[first][second] += 1
-        adjacency[second][first] += 1
-
-    upper = labels[:-1, :]
-    lower = labels[1:, :]
-
-    mask = (
-        (upper > 0)
-        & (lower > 0)
-        & (upper != lower)
-    )
-
-    for first, second in zip(upper[mask], lower[mask]):
-        first = int(first)
-        second = int(second)
-        adjacency[first][second] += 1
-        adjacency[second][first] += 1
-
-    return adjacency
-
-
-def merge_small_segments(
-    labels,
-    feature_arrays,
-    forest_type,
-    minimum_cells,
-    maximum_cells=None,
-):
-    """
-    Iteratively merge undersized segments into the most similar adjacent
-    segment. Shared-border length is used as a small tie-breaker.
-
-    When maximum_cells is supplied, a merge is skipped if the combined
-    segment would exceed the maximum stand size. Any undersized segments
-    that cannot be merged safely are left for the final deletion step.
-    """
-    pass_number = 0
-
-    while True:
-        pass_number += 1
-
-        stats = segment_statistics(
-            labels,
-            feature_arrays,
-            forest_type,
-        )
-
-        small_ids = [
-            segment_id
-            for segment_id, record in stats.items()
-            if record["PIXEL_COUNT"] < minimum_cells
-        ]
-
-        if not small_ids:
-            break
-
-        adjacency = segment_adjacency(labels)
-        merged_this_pass = 0
-
-        # Process smallest first.
-        small_ids.sort(
-            key=lambda segment_id: stats[segment_id]["PIXEL_COUNT"]
-        )
-
-        for small_id in small_ids:
-            if small_id not in stats:
-                continue
-
-            neighbors = adjacency.get(small_id)
-
-            if not neighbors:
-                continue
-
-            source = stats[small_id]
-
-            best_neighbor = None
-            best_cost = float("inf")
-
-            for neighbor_id, shared_edges in neighbors.items():
-                if neighbor_id not in stats:
-                    continue
-
-                target = stats[neighbor_id]
-
-                if (
-                    maximum_cells is not None
-                    and (
-                        source["PIXEL_COUNT"]
-                        + target["PIXEL_COUNT"]
-                    ) > maximum_cells
-                ):
-                    continue
-
-                cost = 0.0
-
-                for name in ["STDAGE", "BALIVE", "QMD", "TPA"]:
-                    difference = source[name] - target[name]
-                    cost += WEIGHTS[name] * difference * difference
-
-                if source["FORTYPCD"] != target["FORTYPCD"]:
-                    cost += WEIGHTS["FORTYPCD"]
-
-                cost -= SHARED_EDGE_BONUS * shared_edges
-
-                if cost < best_cost:
-                    best_cost = cost
-                    best_neighbor = neighbor_id
-
-            if best_neighbor is None:
-                continue
-
-            labels[labels == small_id] = best_neighbor
-            merged_this_pass += 1
-
-        message(
-            f"Small-segment merge pass {pass_number}: "
-            f"{merged_this_pass:,} segments merged"
-        )
-
-        if merged_this_pass == 0:
-            break
-
-        labels = split_disconnected_segments(labels)
-
-    return labels
 
 
 def renumber_segments(labels):
-    output = np.zeros(labels.shape, dtype=np.int32)
+    max_id = int(labels.max())
+    if max_id == 0:
+        return labels.astype(np.int32, copy=True)
+    present = np.bincount(labels.ravel(), minlength=max_id + 1) > 0
+    present[0] = False
+    lookup = np.zeros(max_id + 1, dtype=np.int32)
+    lookup[present] = np.arange(1, int(present.sum()) + 1, dtype=np.int32)
+    return lookup[labels]
 
-    valid_ids = np.unique(labels)
-    valid_ids = valid_ids[valid_ids > 0]
 
-    for new_id, old_id in enumerate(valid_ids, start=1):
-        output[labels == old_id] = new_id
+def segment_adjacency_arrays(labels):
+    """Return unique adjacent segment pairs and their shared-edge counts."""
+    pair_a = []
+    pair_b = []
 
-    return output
+    left = labels[:, :-1]
+    right = labels[:, 1:]
+    mask = (left > 0) & (right > 0) & (left != right)
+    pair_a.append(left[mask].astype(np.int64, copy=False))
+    pair_b.append(right[mask].astype(np.int64, copy=False))
 
+    upper = labels[:-1, :]
+    lower = labels[1:, :]
+    mask = (upper > 0) & (lower > 0) & (upper != lower)
+    pair_a.append(upper[mask].astype(np.int64, copy=False))
+    pair_b.append(lower[mask].astype(np.int64, copy=False))
+
+    if not pair_a or sum(arr.size for arr in pair_a) == 0:
+        return np.empty((0, 2), dtype=np.int64), np.empty(0, dtype=np.int64)
+
+    a = np.concatenate(pair_a)
+    b = np.concatenate(pair_b)
+    lo = np.minimum(a, b)
+    hi = np.maximum(a, b)
+    max_id = int(labels.max()) + 1
+    encoded = lo * max_id + hi
+    unique, counts = np.unique(encoded, return_counts=True)
+    pairs = np.column_stack((unique // max_id, unique % max_id)).astype(np.int64)
+    return pairs, counts.astype(np.int64)
+
+
+# ============================================================
+# OVERSIZED AND UNDERSIZED SEGMENTS
+# ============================================================
 
 def _connected_components(mask):
-    structure = np.array(
-        [
-            [0, 1, 0],
-            [1, 1, 1],
-            [0, 1, 0],
-        ],
-        dtype=np.int8,
-    )
-    return ndimage.label(mask, structure=structure)
+    return ndimage.label(mask, structure=connectivity_structure())
 
 
 def _bisect_connected_mask(mask):
-    """
-    Split one connected region near its spatial median.
-
-    The longer row/column extent is used first. Any disconnected pieces
-    created by the cut are returned separately and are handled recursively.
-    """
     rows, cols = np.where(mask)
-
     if len(rows) < 2:
         return [mask]
 
@@ -786,225 +584,446 @@ def _bisect_connected_mask(mask):
     col_span = int(cols.max() - cols.min())
 
     if col_span >= row_span:
-        coordinate = cols
-        cut = int(np.median(coordinate))
-        first = mask.copy()
-        second = mask.copy()
-
-        grid_cols = np.indices(mask.shape)[1]
-        first[grid_cols > cut] = False
-        second[grid_cols <= cut] = False
+        cut = int(np.median(cols))
+        grid = np.indices(mask.shape)[1]
+        first = mask & (grid <= cut)
+        second = mask & (grid > cut)
     else:
-        coordinate = rows
-        cut = int(np.median(coordinate))
-        first = mask.copy()
-        second = mask.copy()
-
-        grid_rows = np.indices(mask.shape)[0]
-        first[grid_rows > cut] = False
-        second[grid_rows <= cut] = False
+        cut = int(np.median(rows))
+        grid = np.indices(mask.shape)[0]
+        first = mask & (grid <= cut)
+        second = mask & (grid > cut)
 
     pieces = []
-
-    for part in [first, second]:
+    for part in (first, second):
         if not np.any(part):
             continue
-
         component_labels, component_count = _connected_components(part)
-
         for component_id in range(1, component_count + 1):
             component = component_labels == component_id
             if np.any(component):
                 pieces.append(component)
 
-    # Rare fallback when an unusual geometry cannot be split by the median.
     if len(pieces) < 2:
         order = np.lexsort((cols, rows))
         half = len(order) // 2
-
         first = np.zeros(mask.shape, dtype=bool)
         second = np.zeros(mask.shape, dtype=bool)
-
         first[rows[order[:half]], cols[order[:half]]] = True
         second[rows[order[half:]], cols[order[half:]]] = True
-
         pieces = [first, second]
 
     return pieces
 
 
 def split_oversized_segments(labels, maximum_cells):
-    """
-    Recursively spatially bisect segments larger than maximum_cells.
-
-    This is intentionally simple and deterministic. It enforces the acreage
-    ceiling without adding more biological variables to the segmentation
-    objective.
-    """
-    output = np.zeros(labels.shape, dtype=np.int32)
+    output = np.zeros_like(labels, dtype=np.int32)
+    max_id = int(labels.max())
+    slices = ndimage.find_objects(labels, max_label=max_id)
     next_id = 1
     split_count = 0
 
-    for segment_id in np.unique(labels):
-        if segment_id <= 0:
+    for segment_id, bbox in enumerate(slices, start=1):
+        if bbox is None:
             continue
-
-        queue = [labels == segment_id]
+        local_labels = labels[bbox]
+        queue = [local_labels == segment_id]
+        local_output = output[bbox]
 
         while queue:
             mask = queue.pop()
             cell_count = int(mask.sum())
-
             if cell_count <= maximum_cells or cell_count <= 1:
-                output[mask] = next_id
+                local_output[mask] = next_id
                 next_id += 1
                 continue
-
             pieces = _bisect_connected_mask(mask)
-
             if len(pieces) < 2:
-                output[mask] = next_id
+                local_output[mask] = next_id
                 next_id += 1
                 continue
-
             split_count += 1
             queue.extend(pieces)
 
-    message(
-        f"Oversized-segment split operations: "
-        f"{split_count:,}"
-    )
-
+    message(f"Oversized-segment split operations: {split_count:,}")
     return output
 
 
-def delete_small_segments(labels, minimum_cells):
-    """
-    Delete isolated or undersized stands instead of forcing them into a
-    dissimilar neighbor. Deleted cells become NoData in the final raster.
-    """
-    output = labels.copy()
-    deleted_segments = 0
-    deleted_cells = 0
+def merge_small_segments(labels, feature_arrays, forest_type, minimum_cells, maximum_cells=None):
+    """Merge many small segments per pass and remap the raster only once per pass."""
+    pass_number = 0
 
-    segment_ids, counts = np.unique(
-        labels[labels > 0],
-        return_counts=True,
-    )
+    while True:
+        pass_number += 1
+        start = time.perf_counter()
+        stats = segment_statistics_arrays(labels, feature_arrays, forest_type)
+        counts = stats["counts"].copy()
+        active_ids = np.flatnonzero(counts > 0)
+        active_ids = active_ids[active_ids > 0]
+        small_ids = active_ids[counts[active_ids] < minimum_cells]
 
-    for segment_id, cell_count in zip(segment_ids, counts):
-        if int(cell_count) < minimum_cells:
-            output[labels == segment_id] = 0
-            deleted_segments += 1
-            deleted_cells += int(cell_count)
+        if small_ids.size == 0:
+            break
 
-    return output, deleted_segments, deleted_cells
+        pairs, shared_counts = segment_adjacency_arrays(labels)
+        adjacency = defaultdict(list)
+        for (a, b), shared in zip(pairs, shared_counts):
+            adjacency[int(a)].append((int(b), int(shared)))
+            adjacency[int(b)].append((int(a), int(shared)))
 
+        parent = np.arange(len(counts), dtype=np.int64)
+        current_size = counts.astype(np.int64, copy=True)
 
-def create_summary(
-    labels,
-    raw_arrays,
-    forest_type,
-    cell_acres,
-    homogeneity_scales,
-):
-    """
-    Create stand summaries and a 0-100 landscape-relative homogeneity score.
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return int(x)
 
-    For each continuous variable:
+        merged = 0
+        order = small_ids[np.argsort(counts[small_ids])]
 
-        homogeneity = 1 - (stand SD / landscape SD)
+        for small_id in order:
+            source_root = find(int(small_id))
+            if source_root != int(small_id) or current_size[source_root] >= minimum_cells:
+                continue
 
-    Values are clipped to the range 0-1. Therefore:
+            best_root = None
+            best_cost = float("inf")
 
-        100 = no within-stand variation
-          0 = stand variation equals or exceeds landscape variation
+            for neighbor_id, shared_edges in adjacency.get(int(small_id), []):
+                target_root = find(neighbor_id)
+                if target_root == source_root or current_size[target_root] == 0:
+                    continue
+                combined_size = current_size[source_root] + current_size[target_root]
+                if maximum_cells is not None and combined_size > maximum_cells:
+                    continue
 
-    Forest-type homogeneity is the proportion of stand cells belonging to
-    the dominant FORTYPCD. The final score uses the same weights as the
-    segmentation model.
+                cost = 0.0
+                for name in ["STDAGE", "BALIVE", "QMD", "TPA"]:
+                    difference = (
+                        stats["means"][name][source_root]
+                        - stats["means"][name][target_root]
+                    )
+                    cost += WEIGHTS[name] * difference * difference
 
-    The raw within-stand means, standard deviations, minima, and maxima are
-    retained so the custom score does not replace directly interpretable
-    statistics.
-    """
-    records = []
+                if stats["dominant_type"][source_root] != stats["dominant_type"][target_root]:
+                    cost += WEIGHTS["FORTYPCD"]
+                cost -= SHARED_EDGE_BONUS * shared_edges
 
-    for segment_id in np.unique(labels):
-        if segment_id <= 0:
-            continue
+                if cost < best_cost:
+                    best_cost = cost
+                    best_root = target_root
 
-        mask = labels == segment_id
-        pixel_count = int(mask.sum())
+            if best_root is None:
+                continue
 
-        record = {
-            "SEG_ID": int(segment_id),
-            "PIXEL_COUNT": pixel_count,
-            "Acres": pixel_count * cell_acres,
-        }
+            # Update the continuous sufficient statistics immediately so
+            # later decisions in this pass use the combined group means.
+            source_size = current_size[source_root]
+            target_size = current_size[best_root]
+            combined_size = source_size + target_size
 
-        component_scores = {}
+            for name in ["STDAGE", "BALIVE", "QMD", "TPA"]:
+                combined_sum = (
+                    stats["means"][name][source_root] * source_size
+                    + stats["means"][name][best_root] * target_size
+                )
+                stats["means"][name][best_root] = (
+                    combined_sum / combined_size
+                    if combined_size > 0
+                    else 0.0
+                )
 
-        for name, array in raw_arrays.items():
-            values = array[mask]
+            # Dominant forest type is updated conservatively from the
+            # dominant-type counts available for each group.
+            if (
+                stats["dominant_type"][source_root]
+                == stats["dominant_type"][best_root]
+            ):
+                stats["dominant_count"][best_root] += (
+                    stats["dominant_count"][source_root]
+                )
+            elif (
+                stats["dominant_count"][source_root]
+                > stats["dominant_count"][best_root]
+            ):
+                stats["dominant_type"][best_root] = (
+                    stats["dominant_type"][source_root]
+                )
+                stats["dominant_count"][best_root] = (
+                    stats["dominant_count"][source_root]
+                )
 
-            mean_value = float(np.nanmean(values))
-            sd_value = float(np.nanstd(values))
+            parent[source_root] = best_root
+            current_size[best_root] = combined_size
+            current_size[source_root] = 0
+            merged += 1
 
-            record[f"{name}_MEAN"] = mean_value
-            record[f"{name}_SD"] = sd_value
-            record[f"{name}_MIN"] = float(np.nanmin(values))
-            record[f"{name}_MAX"] = float(np.nanmax(values))
-
-            landscape_sd = float(homogeneity_scales[name])
-
-            if not np.isfinite(landscape_sd) or landscape_sd <= 0:
-                component = 1.0 if sd_value == 0 else 0.0
-            else:
-                component = 1.0 - (sd_value / landscape_sd)
-                component = float(np.clip(component, 0.0, 1.0))
-
-            component_scores[name] = component
-            record[f"{name}_HOM"] = 100.0 * component
-
-        types = forest_type[mask]
-        types = types[np.isfinite(types)].astype(np.int32)
-
-        type_counts = Counter(types)
-        dominant_type, dominant_count = type_counts.most_common(1)[0]
-
-        forest_type_fraction = dominant_count / pixel_count
-
-        record["FORTYPCD_DOM"] = int(dominant_type)
-        record["FORTYPE_PCT"] = 100.0 * forest_type_fraction
-        record["FORTYPCD_HOM"] = 100.0 * forest_type_fraction
-
-        weighted_score = (
-            WEIGHTS["STDAGE"] * component_scores["STDAGE"]
-            + WEIGHTS["BALIVE"] * component_scores["BALIVE"]
-            + WEIGHTS["QMD"] * component_scores["QMD"]
-            + WEIGHTS["TPA"] * component_scores["TPA"]
-            + WEIGHTS["FORTYPCD"] * forest_type_fraction
+        message(
+            f"Small-segment merge pass {pass_number}: {merged:,} segments merged "
+            f"in {time.perf_counter() - start:,.1f} seconds"
         )
 
-        record["HOMOGENEITY"] = 100.0 * weighted_score
+        if merged == 0:
+            break
 
-        records.append(record)
+        lookup = np.arange(len(parent), dtype=np.int64)
+        for segment_id in active_ids:
+            lookup[segment_id] = find(int(segment_id))
+        labels = lookup[labels].astype(np.int32)
+        labels = split_disconnected_segments(labels)
 
-    return pd.DataFrame(records)
+    return labels
 
+
+
+def merge_similar_adjacent_stands(
+    labels,
+    raw_age,
+    forest_type,
+    maximum_cells,
+    maximum_age_difference,
+    require_same_forest_type=True,
+    minimum_shared_edges=1,
+    maximum_passes=50,
+):
+    """
+    Greedily merge adjacent stands that are biologically similar.
+
+    A candidate pair must remain under the maximum stand size, meet the age
+    threshold, and (optionally) share the same dominant FORTYPCD. Each stand
+    can participate in at most one merge per pass so all decisions in a pass
+    use current, internally consistent stand statistics.
+    """
+    total_merged = 0
+
+    for pass_number in range(1, maximum_passes + 1):
+        start = time.perf_counter()
+
+        stats = segment_statistics_arrays(
+            labels,
+            {"STDAGE": raw_age},
+            forest_type,
+        )
+        counts = stats["counts"]
+        age_means = stats["means"]["STDAGE"]
+        dominant_type = stats["dominant_type"]
+
+        pairs, shared_edges = segment_adjacency_arrays(labels)
+        if pairs.size == 0:
+            break
+
+        first = pairs[:, 0]
+        second = pairs[:, 1]
+        combined = counts[first] + counts[second]
+        age_difference = np.abs(age_means[first] - age_means[second])
+
+        eligible = (
+            (combined <= maximum_cells)
+            & (age_difference <= maximum_age_difference)
+            & (shared_edges >= minimum_shared_edges)
+        )
+
+        if require_same_forest_type:
+            eligible &= dominant_type[first] == dominant_type[second]
+
+        candidate_indices = np.flatnonzero(eligible)
+        if candidate_indices.size == 0:
+            message(
+                f"Similar-stand merge pass {pass_number}: 0 segments merged "
+                f"in {time.perf_counter() - start:,.1f} seconds"
+            )
+            break
+
+        # Prefer the closest ages, then the longest shared boundary.
+        order = candidate_indices[
+            np.lexsort((
+                -shared_edges[candidate_indices],
+                age_difference[candidate_indices],
+            ))
+        ]
+
+        used = np.zeros(len(counts), dtype=bool)
+        parent = np.arange(len(counts), dtype=np.int64)
+        merged_this_pass = 0
+
+        for index in order:
+            a = int(first[index])
+            b = int(second[index])
+            if used[a] or used[b]:
+                continue
+
+            # Keep the larger segment ID as the target only for deterministic
+            # behavior; IDs are renumbered later.
+            if counts[a] > counts[b] or (counts[a] == counts[b] and a < b):
+                target, source = a, b
+            else:
+                target, source = b, a
+
+            parent[source] = target
+            used[source] = True
+            used[target] = True
+            merged_this_pass += 1
+
+        message(
+            f"Similar-stand merge pass {pass_number}: "
+            f"{merged_this_pass:,} segments merged "
+            f"in {time.perf_counter() - start:,.1f} seconds"
+        )
+
+        if merged_this_pass == 0:
+            break
+
+        labels = parent[labels].astype(np.int32)
+        labels = split_disconnected_segments(labels)
+        total_merged += merged_this_pass
+
+    message(f"Total similar adjacent stands merged: {total_merged:,}")
+    return labels
+
+
+def diagnose_remaining_small_segments(labels, minimum_cells, maximum_cells):
+    """Explain why undersized segments could not be merged."""
+    counts = np.bincount(labels.ravel())
+    small_ids = np.flatnonzero(
+        (counts > 0) & (counts < minimum_cells)
+    )
+    small_ids = small_ids[small_ids > 0]
+
+    pairs, _ = segment_adjacency_arrays(labels)
+    adjacency = defaultdict(list)
+    for a, b in pairs:
+        adjacency[int(a)].append(int(b))
+        adjacency[int(b)].append(int(a))
+
+    no_neighbor = 0
+    maximum_blocked = 0
+    otherwise_unmerged = 0
+
+    for segment_id in small_ids:
+        neighbors = adjacency.get(int(segment_id), [])
+        if not neighbors:
+            no_neighbor += 1
+            continue
+
+        has_size_eligible_neighbor = any(
+            counts[int(segment_id)] + counts[neighbor] <= maximum_cells
+            for neighbor in neighbors
+        )
+
+        if not has_size_eligible_neighbor:
+            maximum_blocked += 1
+        else:
+            otherwise_unmerged += 1
+
+    message("Remaining undersized-segment diagnostic:")
+    message(f"  No adjacent segment: {no_neighbor:,}")
+    message(
+        f"  All adjacent merges exceed maximum size: "
+        f"{maximum_blocked:,}"
+    )
+    message(
+        f"  At least one size-eligible neighbor remained: "
+        f"{otherwise_unmerged:,}"
+    )
+
+    return {
+        "no_neighbor": no_neighbor,
+        "maximum_blocked": maximum_blocked,
+        "otherwise_unmerged": otherwise_unmerged,
+    }
+
+def delete_small_segments(labels, minimum_cells):
+    counts = np.bincount(labels.ravel())
+    small = np.flatnonzero((counts > 0) & (counts < minimum_cells))
+    small = small[small > 0]
+    delete_lookup = np.zeros(len(counts), dtype=bool)
+    delete_lookup[small] = True
+    delete_mask = delete_lookup[labels]
+    output = labels.copy()
+    output[delete_mask] = 0
+    return output, int(len(small)), int(delete_mask.sum())
+
+
+# ============================================================
+# FAST SUMMARY
+# ============================================================
+
+def create_summary(labels, raw_arrays, forest_type, cell_acres, homogeneity_scales):
+    valid = labels > 0
+    ids = labels[valid].astype(np.int64, copy=False)
+    max_id = int(ids.max()) if ids.size else 0
+    counts = np.bincount(ids, minlength=max_id + 1).astype(np.int64)
+    segment_ids = np.flatnonzero(counts > 0)
+    segment_ids = segment_ids[segment_ids > 0]
+
+    data = {
+        "SEG_ID": segment_ids.astype(np.int32),
+        "PIXEL_COUNT": counts[segment_ids],
+        "Acres": counts[segment_ids] * cell_acres,
+    }
+    component_scores = {}
+
+    for name, array in raw_arrays.items():
+        values = array[valid].astype(np.float64, copy=False)
+        sums = np.bincount(ids, weights=values, minlength=max_id + 1)
+        sums_sq = np.bincount(ids, weights=values * values, minlength=max_id + 1)
+        means = np.divide(sums, counts, out=np.zeros(max_id + 1), where=counts > 0)
+        variances = np.divide(sums_sq, counts, out=np.zeros(max_id + 1), where=counts > 0) - means * means
+        variances = np.maximum(variances, 0.0)
+        sds = np.sqrt(variances)
+
+        mins = ndimage.minimum(array, labels=labels, index=segment_ids)
+        maxs = ndimage.maximum(array, labels=labels, index=segment_ids)
+
+        data[f"{name}_MEAN"] = means[segment_ids]
+        data[f"{name}_SD"] = sds[segment_ids]
+        data[f"{name}_MIN"] = mins
+        data[f"{name}_MAX"] = maxs
+
+        landscape_sd = float(homogeneity_scales[name])
+        if not np.isfinite(landscape_sd) or landscape_sd <= 0:
+            component = np.where(sds[segment_ids] == 0, 1.0, 0.0)
+        else:
+            component = np.clip(1.0 - sds[segment_ids] / landscape_sd, 0.0, 1.0)
+        component_scores[name] = component
+        data[f"{name}_HOM"] = 100.0 * component
+
+    types = forest_type[valid].astype(np.int64, copy=False)
+    unique_types, compact_types = np.unique(types, return_inverse=True)
+    n_types = len(unique_types)
+    combined = ids * n_types + compact_types
+    pair_counts = np.bincount(combined, minlength=(max_id + 1) * n_types).reshape(max_id + 1, n_types)
+    dominant_index = np.argmax(pair_counts, axis=1)
+    dominant_type = unique_types[dominant_index]
+    dominant_count = pair_counts[np.arange(max_id + 1), dominant_index]
+    forest_fraction = dominant_count[segment_ids] / counts[segment_ids]
+
+    data["FORTYPCD_DOM"] = dominant_type[segment_ids].astype(np.int32)
+    data["FORTYPE_PCT"] = 100.0 * forest_fraction
+    data["FORTYPCD_HOM"] = 100.0 * forest_fraction
+
+    weighted_score = (
+        WEIGHTS["STDAGE"] * component_scores["STDAGE"]
+        + WEIGHTS["BALIVE"] * component_scores["BALIVE"]
+        + WEIGHTS["QMD"] * component_scores["QMD"]
+        + WEIGHTS["TPA"] * component_scores["TPA"]
+        + WEIGHTS["FORTYPCD"] * forest_fraction
+    )
+    data["HOMOGENEITY"] = 100.0 * weighted_score
+    return pd.DataFrame(data)
+
+
+# ============================================================
+# OUTPUTS
+# ============================================================
 
 def write_segment_raster(labels, geometry):
     output_nodata = -9999
-
     export_array = labels.astype(np.int32)
     export_array[export_array == 0] = output_nodata
-
-    lower_left = arcpy.Point(
-        geometry["xmin"],
-        geometry["ymin"],
-    )
-
+    lower_left = arcpy.Point(geometry["xmin"], geometry["ymin"])
     raster = arcpy.NumPyArrayToRaster(
         export_array,
         lower_left,
@@ -1012,28 +1031,13 @@ def write_segment_raster(labels, geometry):
         geometry["cell_height"],
         value_to_nodata=output_nodata,
     )
-
     raster.save(segment_raster)
-
-    arcpy.management.DefineProjection(
-        segment_raster,
-        geometry["spatial_reference"],
-    )
-
-    arcpy.management.CalculateStatistics(
-        segment_raster,
-    )
-
+    arcpy.management.DefineProjection(segment_raster, geometry["spatial_reference"])
+    arcpy.management.CalculateStatistics(segment_raster)
     try:
-        arcpy.management.BuildRasterAttributeTable(
-            segment_raster,
-            "Overwrite",
-        )
+        arcpy.management.BuildRasterAttributeTable(segment_raster, "Overwrite")
     except arcpy.ExecuteError:
-        message(
-            "Raster attribute table was not built, but the "
-            "segment raster was created."
-        )
+        message("Raster attribute table was not built, but the segment raster was created.")
 
 
 def write_segment_polygons(summary):
@@ -1048,66 +1052,27 @@ def write_segment_polygons(summary):
         create_multipart_features="SINGLE_OUTER_PART",
     )
 
-    existing_fields = {
-        field.name.upper()
-        for field in arcpy.ListFields(segment_polygons)
-    }
-
+    existing_fields = {field.name.upper() for field in arcpy.ListFields(segment_polygons)}
     if "SEG_ID" not in existing_fields:
-        arcpy.management.AddField(
-            segment_polygons,
-            "SEG_ID",
-            "LONG",
-        )
+        arcpy.management.AddField(segment_polygons, "SEG_ID", "LONG")
 
     value_field = None
-
     for field in arcpy.ListFields(segment_polygons):
         if field.name.upper() in {"GRIDCODE", "GRID_CODE"}:
             value_field = field.name
             break
-
     if value_field is None:
-        raise RuntimeError(
-            "Could not identify the raster-value field in the "
-            "polygon output."
-        )
+        raise RuntimeError("Could not identify the raster-value field in the polygon output.")
 
-    arcpy.management.CalculateField(
-        segment_polygons,
-        "SEG_ID",
-        f"!{value_field}!",
-        "PYTHON3",
-    )
+    arcpy.management.CalculateField(segment_polygons, "SEG_ID", f"!{value_field}!", "PYTHON3")
 
-    # Join summary attributes through an intermediate geodatabase table.
-    summary_table = os.path.join(
-        output_gdb,
-        "TreeMap_Segment_Summary",
-    )
-
+    summary_table = os.path.join(output_gdb, "TreeMap_Segment_Summary")
     if arcpy.Exists(summary_table):
         arcpy.management.Delete(summary_table)
 
-    arcpy.conversion.TableToTable(
-        segment_summary_csv,
-        output_gdb,
-        os.path.basename(summary_table),
-    )
-
-    join_fields = [
-        field
-        for field in summary.columns
-        if field != "SEG_ID"
-    ]
-
-    arcpy.management.JoinField(
-        segment_polygons,
-        "SEG_ID",
-        summary_table,
-        "SEG_ID",
-        join_fields,
-    )
+    arcpy.conversion.TableToTable(segment_summary_csv, output_gdb, os.path.basename(summary_table))
+    join_fields = [field for field in summary.columns if field != "SEG_ID"]
+    arcpy.management.JoinField(segment_polygons, "SEG_ID", summary_table, "SEG_ID", join_fields)
 
 
 # ============================================================
@@ -1120,15 +1085,9 @@ def main():
     message("=" * 60)
 
     validate_inputs()
-
     geometry = validate_alignment(
         age_raster,
-        [
-            forest_type_raster,
-            basal_area_raster,
-            qmd_raster,
-            tpa_raster,
-        ],
+        [forest_type_raster, basal_area_raster, qmd_raster, tpa_raster],
     )
 
     arcpy.env.snapRaster = age_raster
@@ -1136,43 +1095,20 @@ def main():
     arcpy.env.extent = age_raster
     arcpy.env.outputCoordinateSystem = age_raster
 
-    cell_area_map_units = (
-        geometry["cell_width"]
-        * geometry["cell_height"]
-    )
-
-    # The current TreeMap data are in a meter-based projected coordinate
-    # system. Convert square meters to acres.
+    cell_area_map_units = geometry["cell_width"] * geometry["cell_height"]
     cell_acres = cell_area_map_units / 4046.8564224
-
-    initial_seed_cells = max(
-        1,
-        int(round(INITIAL_SEED_ACRES / cell_acres)),
+    initial_seed_cells = max(1, int(round(INITIAL_SEED_ACRES / cell_acres)))
+    minimum_stand_cells = max(1, int(math.ceil(MIN_STAND_ACRES / cell_acres)))
+    maximum_stand_cells = max(
+        minimum_stand_cells,
+        int(math.floor(MAX_STAND_ACRES / cell_acres)),
     )
 
-    minimum_stand_cells = max(
-        1,
-        int(math.ceil(MIN_STAND_ACRES / cell_acres)),
-    )
-
-    message(
-        f"Cell size: "
-        f"{geometry['cell_width']:.3f} × "
-        f"{geometry['cell_height']:.3f} map units"
-    )
+    message(f"Cell size: {geometry['cell_width']:.3f} × {geometry['cell_height']:.3f} map units")
     message(f"Cell area: {cell_acres:.6f} acres")
-    message(
-        f"Initial seed size: approximately "
-        f"{initial_seed_cells:,} cells"
-    )
-    message(
-        f"Minimum stand size: "
-        f"{minimum_stand_cells:,} cells"
-    )
-    message(
-        f"Maximum stand size: approximately "
-        f"{int(math.floor(MAX_STAND_ACRES / cell_acres)):,} cells"
-    )
+    message(f"Initial seed size: approximately {initial_seed_cells:,} cells")
+    message(f"Minimum stand size: {minimum_stand_cells:,} cells")
+    message(f"Maximum stand size: approximately {maximum_stand_cells:,} cells")
 
     message("=" * 60)
     message("READING SEGMENTATION RASTERS")
@@ -1180,18 +1116,9 @@ def main():
 
     age = read_raster(age_raster)
     forest_type = read_raster(forest_type_raster)
-    basal_area = read_raster(
-        basal_area_raster,
-        scale=10.0,
-    )
-    qmd = read_raster(
-        qmd_raster,
-        scale=10.0,
-    )
-    tpa = read_raster(
-        tpa_raster,
-        scale=10.0,
-    )
+    basal_area = read_raster(basal_area_raster, scale=10.0)
+    qmd = read_raster(qmd_raster, scale=10.0)
+    tpa = read_raster(tpa_raster, scale=10.0)
 
     valid_mask = (
         np.isfinite(age)
@@ -1200,140 +1127,62 @@ def main():
         & np.isfinite(qmd)
         & np.isfinite(tpa)
     )
-
     valid_cells = int(valid_mask.sum())
-
     if valid_cells == 0:
-        raise RuntimeError(
-            "No cells contained complete data across all five rasters."
-        )
-
-    message(
-        f"Cells with complete segmentation data: "
-        f"{valid_cells:,}"
-    )
+        raise RuntimeError("No cells contained complete data across all five rasters.")
+    message(f"Cells with complete segmentation data: {valid_cells:,}")
 
     message("=" * 60)
     message("STANDARDIZING CONTINUOUS VARIABLES")
     message("=" * 60)
 
-    age_z, age_center, age_scale = robust_standardize(
-        age,
-        valid_mask,
-    )
-    ba_z, ba_center, ba_scale = robust_standardize(
-        basal_area,
-        valid_mask,
-    )
-    qmd_z, qmd_center, qmd_scale = robust_standardize(
-        qmd,
-        valid_mask,
-    )
-    tpa_z, tpa_center, tpa_scale = robust_standardize(
-        tpa,
-        valid_mask,
-    )
+    age_z, age_center, age_scale = robust_standardize(age, valid_mask)
+    ba_z, ba_center, ba_scale = robust_standardize(basal_area, valid_mask)
+    qmd_z, qmd_center, qmd_scale = robust_standardize(qmd, valid_mask)
+    tpa_z, tpa_center, tpa_scale = robust_standardize(tpa, valid_mask)
 
-    message(
-        f"STDAGE center={age_center:.3f}, scale={age_scale:.3f}"
-    )
-    message(
-        f"BALIVE center={ba_center:.3f}, scale={ba_scale:.3f}"
-    )
-    message(
-        f"QMD center={qmd_center:.3f}, scale={qmd_scale:.3f}"
-    )
-    message(
-        f"TPA center={tpa_center:.3f}, scale={tpa_scale:.3f}"
-    )
+    message(f"STDAGE center={age_center:.3f}, scale={age_scale:.3f}")
+    message(f"BALIVE center={ba_center:.3f}, scale={ba_scale:.3f}")
+    message(f"QMD center={qmd_center:.3f}, scale={qmd_scale:.3f}")
+    message(f"TPA center={tpa_center:.3f}, scale={tpa_scale:.3f}")
 
-    feature_arrays = {
-        "STDAGE": age_z,
-        "BALIVE": ba_z,
-        "QMD": qmd_z,
-        "TPA": tpa_z,
-    }
-
-    raw_arrays = {
-        "STDAGE": age,
-        "BALIVE": basal_area,
-        "QMD": qmd,
-        "TPA": tpa,
-    }
+    feature_arrays = {"STDAGE": age_z, "BALIVE": ba_z, "QMD": qmd_z, "TPA": tpa_z}
+    raw_arrays = {"STDAGE": age, "BALIVE": basal_area, "QMD": qmd, "TPA": tpa}
 
     message("=" * 60)
     message("CREATING INITIAL SEEDS")
     message("=" * 60)
-
-    labels = create_initial_segments(
-        valid_mask,
-        initial_seed_cells,
-    )
-
-    initial_count = len(
-        np.unique(labels[labels > 0])
-    )
-
-    message(
-        f"Initial connected seed regions: "
-        f"{initial_count:,}"
-    )
+    start = time.perf_counter()
+    labels = create_initial_segments(valid_mask, initial_seed_cells)
+    initial_count = int(np.count_nonzero(np.bincount(labels.ravel())[1:]))
+    message(f"Initial connected seed regions: {initial_count:,}")
+    timed_message("Initial seed creation", start)
 
     message("=" * 60)
     message("ITERATIVE CELL REASSIGNMENT")
     message("=" * 60)
-
-    labels = iterative_reassignment(
-        labels,
-        valid_mask,
-        feature_arrays,
-        forest_type,
-    )
+    labels = iterative_reassignment(labels, valid_mask, feature_arrays, forest_type)
 
     message("=" * 60)
     message("SEPARATING DISCONNECTED PIECES")
     message("=" * 60)
-
+    start = time.perf_counter()
     labels = split_disconnected_segments(labels)
-
-    pre_merge_count = len(
-        np.unique(labels[labels > 0])
-    )
-
-    message(
-        f"Connected segments before minimum-size merging: "
-        f"{pre_merge_count:,}"
-    )
-
-    maximum_stand_cells = max(
-        minimum_stand_cells,
-        int(math.floor(MAX_STAND_ACRES / cell_acres)),
-    )
+    pre_merge_count = int(np.count_nonzero(np.bincount(labels.ravel())[1:]))
+    message(f"Connected segments before maximum-size splitting: {pre_merge_count:,}")
+    timed_message("Disconnected-piece separation", start)
 
     message("=" * 60)
     message("SPLITTING OVERSIZED SEGMENTS")
     message("=" * 60)
-
-    labels = split_oversized_segments(
-        labels,
-        maximum_stand_cells,
-    )
-
+    labels = split_oversized_segments(labels, maximum_stand_cells)
     labels = split_disconnected_segments(labels)
-
-    count_after_split = len(
-        np.unique(labels[labels > 0])
-    )
-
-    message(
-        f"Connected segments after maximum-size splitting: "
-        f"{count_after_split:,}"
-    )
+    count_after_split = int(np.count_nonzero(np.bincount(labels.ravel())[1:]))
+    message(f"Connected segments after maximum-size splitting: {count_after_split:,}")
 
     message("=" * 60)
     message("MERGING UNDERSIZED SEGMENTS")
     message("=" * 60)
-
     labels = merge_small_segments(
         labels,
         feature_arrays,
@@ -1341,173 +1190,124 @@ def main():
         minimum_stand_cells,
         maximum_cells=maximum_stand_cells,
     )
-
     labels = split_disconnected_segments(labels)
 
-    remaining_small_before_delete = sum(
-        1
-        for count in np.unique(
-            labels[labels > 0],
-            return_counts=True,
-        )[1]
-        if int(count) < minimum_stand_cells
+    counts = np.bincount(labels.ravel())
+    remaining_small_before_delete = int(
+        np.sum((counts[1:] > 0) & (counts[1:] < minimum_stand_cells))
     )
-
     message(
         f"Undersized segments remaining after merge: "
         f"{remaining_small_before_delete:,}"
     )
 
+    diagnose_remaining_small_segments(
+        labels,
+        minimum_stand_cells,
+        maximum_stand_cells,
+    )
+
+    if MERGE_SIMILAR_STANDS:
+        message("=" * 60)
+        message("MERGING SIMILAR ADJACENT STANDS")
+        message("=" * 60)
+        message(
+            f"Criteria: age difference <= "
+            f"{SIMILAR_MERGE_MAX_AGE_DIFFERENCE:.1f} years; "
+            f"same dominant FORTYPCD="
+            f"{SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD}; "
+            f"combined size <= {MAX_STAND_ACRES:.1f} acres"
+        )
+        labels = merge_similar_adjacent_stands(
+            labels,
+            age,
+            forest_type,
+            maximum_stand_cells,
+            SIMILAR_MERGE_MAX_AGE_DIFFERENCE,
+            require_same_forest_type=(
+                SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD
+            ),
+            minimum_shared_edges=SIMILAR_MERGE_MIN_SHARED_EDGES,
+            maximum_passes=SIMILAR_MERGE_MAX_PASSES,
+        )
+        labels = split_disconnected_segments(labels)
+
+        counts = np.bincount(labels.ravel())
+        remaining_small_before_delete = int(
+            np.sum(
+                (counts[1:] > 0)
+                & (counts[1:] < minimum_stand_cells)
+            )
+        )
+        message(
+            f"Undersized segments after similar-stand merging: "
+            f"{remaining_small_before_delete:,}"
+        )
+        diagnose_remaining_small_segments(
+            labels,
+            minimum_stand_cells,
+            maximum_stand_cells,
+        )
+
     message("=" * 60)
     message("DELETING REMAINING UNDERSIZED SEGMENTS")
     message("=" * 60)
-
-    labels, deleted_segments, deleted_cells = delete_small_segments(
-        labels,
-        minimum_stand_cells,
-    )
-
+    labels, deleted_segments, deleted_cells = delete_small_segments(labels, minimum_stand_cells)
     labels = split_disconnected_segments(labels)
     labels = renumber_segments(labels)
 
-    message(
-        f"Deleted undersized segments: "
-        f"{deleted_segments:,}"
-    )
-    message(
-        f"Deleted forest cells: "
-        f"{deleted_cells:,} "
-        f"({deleted_cells * cell_acres:,.2f} acres)"
-    )
-
-    final_count = len(
-        np.unique(labels[labels > 0])
-    )
-
-    message(
-        f"Final segment count: "
-        f"{final_count:,}"
-    )
+    message(f"Deleted undersized segments: {deleted_segments:,}")
+    message(f"Deleted forest cells: {deleted_cells:,} ({deleted_cells * cell_acres:,.2f} acres)")
+    final_count = int(labels.max())
+    message(f"Final segment count: {final_count:,}")
 
     message("=" * 60)
     message("CREATING SEGMENT SUMMARY")
     message("=" * 60)
-
-    # Use the actual standard deviation across all valid landscape cells
-    # as the reference for the landscape-relative homogeneity calculation.
     homogeneity_scales = {
         "STDAGE": float(np.nanstd(age[valid_mask])),
         "BALIVE": float(np.nanstd(basal_area[valid_mask])),
         "QMD": float(np.nanstd(qmd[valid_mask])),
         "TPA": float(np.nanstd(tpa[valid_mask])),
     }
-
     message("Landscape standard deviations used for homogeneity:")
     for variable, landscape_sd in homogeneity_scales.items():
-        message(
-            f"  {variable}: {landscape_sd:.3f}"
-        )
+        message(f"  {variable}: {landscape_sd:.3f}")
 
-    summary = create_summary(
-        labels,
-        raw_arrays,
-        forest_type,
-        cell_acres,
-        homogeneity_scales,
-    )
+    start = time.perf_counter()
+    summary = create_summary(labels, raw_arrays, forest_type, cell_acres, homogeneity_scales)
+    timed_message("Segment summary", start)
+    summary.to_csv(segment_summary_csv, index=False)
+    message(f"Segment summary written:\n{segment_summary_csv}")
 
-    summary.to_csv(
-        segment_summary_csv,
-        index=False,
-    )
+    message(f"Mean stand acreage: {summary['Acres'].mean():.2f}")
+    message(f"Median stand acreage: {summary['Acres'].median():.2f}")
+    message(f"Minimum stand acreage: {summary['Acres'].min():.2f}")
+    message(f"Maximum stand acreage: {summary['Acres'].max():.2f}")
 
-    message(
-        f"Segment summary written:\n"
-        f"{segment_summary_csv}"
-    )
-
-    message(
-        f"Mean stand acreage: "
-        f"{summary['Acres'].mean():.2f}"
-    )
-    message(
-        f"Median stand acreage: "
-        f"{summary['Acres'].median():.2f}"
-    )
-    message(
-        f"Minimum stand acreage: "
-        f"{summary['Acres'].min():.2f}"
-    )
-    message(
-        f"Maximum stand acreage: "
-        f"{summary['Acres'].max():.2f}"
-    )
-
-    mean_homogeneity = float(
-        summary["HOMOGENEITY"].mean()
-    )
-
-    area_weighted_homogeneity = float(
-        np.average(
-            summary["HOMOGENEITY"],
-            weights=summary["Acres"],
-        )
-    )
-
-    message(
-        f"Mean stand homogeneity score: "
-        f"{mean_homogeneity:.2f} / 100"
-    )
-    message(
-        f"Area-weighted landscape homogeneity score: "
-        f"{area_weighted_homogeneity:.2f} / 100"
-    )
+    mean_homogeneity = float(summary["HOMOGENEITY"].mean())
+    area_weighted_homogeneity = float(np.average(summary["HOMOGENEITY"], weights=summary["Acres"]))
+    message(f"Mean stand homogeneity score: {mean_homogeneity:.2f} / 100")
+    message(f"Area-weighted landscape homogeneity score: {area_weighted_homogeneity:.2f} / 100")
 
     message("Mean within-stand standard deviations:")
     for variable in ["STDAGE", "BALIVE", "QMD", "TPA"]:
         sd_field = f"{variable}_SD"
-
-        unweighted_mean_sd = float(
-            summary[sd_field].mean()
-        )
-
-        area_weighted_mean_sd = float(
-            np.average(
-                summary[sd_field],
-                weights=summary["Acres"],
-            )
-        )
-
-        message(
-            f"  {variable}: "
-            f"mean={unweighted_mean_sd:.3f}, "
-            f"area-weighted={area_weighted_mean_sd:.3f}"
-        )
+        unweighted_mean_sd = float(summary[sd_field].mean())
+        area_weighted_mean_sd = float(np.average(summary[sd_field], weights=summary["Acres"]))
+        message(f"  {variable}: mean={unweighted_mean_sd:.3f}, area-weighted={area_weighted_mean_sd:.3f}")
 
     message("=" * 60)
     message("WRITING SEGMENT RASTER")
     message("=" * 60)
-
-    write_segment_raster(
-        labels,
-        geometry,
-    )
-
-    message(
-        f"Segment raster written:\n"
-        f"{segment_raster}"
-    )
+    write_segment_raster(labels, geometry)
+    message(f"Segment raster written:\n{segment_raster}")
 
     message("=" * 60)
     message("CONVERTING SEGMENTS TO POLYGONS")
     message("=" * 60)
-
     write_segment_polygons(summary)
-
-    message(
-        f"Segment polygons written:\n"
-        f"{segment_polygons}"
-    )
+    message(f"Segment polygons written:\n{segment_polygons}")
 
     message("=" * 60)
     message("SEGMENTATION COMPLETE")
