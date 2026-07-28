@@ -1,39 +1,4 @@
 """
-02_segment_treemap.py
-
-Prototype TreeMap stand segmentation for LETO.
-
-Inputs
-------
-Five aligned rasters created by 01_build_segmentation_rasters.py:
-    TreeMap_STDAGE.tif
-    TreeMap_FORTYPCD.tif
-    TreeMap_BALIVE.tif   (stored value = actual ft2/ac * 10)
-    TreeMap_QMD.tif      (stored value = actual inches * 10)
-    TreeMap_TPA.tif      (stored value = actual trees/ac * 10)
-
-Outputs
--------
-    TreeMap_Segments_Initial.tif
-    TreeMap_Segments_Initial  (polygon feature class)
-    TreeMap_Segment_Summary.csv
-
-Method
-------
-1. Read aligned raster arrays.
-2. Standardize continuous variables.
-3. Create regular block seeds of approximately INITIAL_SEED_ACRES.
-4. Iteratively reassign boundary cells to the most similar adjacent segment.
-5. Separate disconnected segment pieces.
-6. Merge segments smaller than MIN_STAND_ACRES.
-7. Export raster, polygons, and segment summaries.
-
-This is an intentionally simple prototype. It is meant to test whether the
-TreeMap/FIA raster stack produces believable stand-like units before adding
-more complex shape, ownership, and maximum-area controls.
-"""
-
-"""
 02_segment_treemap_v3.py
 
 Boundary-vectorized TreeMap stand segmentation for LETO.
@@ -80,6 +45,39 @@ segment_raster = os.path.join(output_folder, "TreeMap_Segments_Initial.tif")
 segment_polygons = os.path.join(output_gdb, "TreeMap_Segments_Initial")
 segment_summary_csv = os.path.join(output_folder, "TreeMap_Segment_Summary.csv")
 
+# NHDPlus High Resolution national hydrography inputs.
+nhd_flowline = (
+    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
+    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
+    r"\NetworkNHDFlowline"
+)
+nhd_area = (
+    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
+    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
+    r"\NHDArea"
+)
+nhd_waterbody = (
+    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
+    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
+    r"\NHDWaterbody"
+)
+
+# USFWS National Wetlands Inventory polygon inputs.
+# Add one or more state feature classes or shapefiles to this list. The script
+# clips, merges, and dissolves them automatically, so state boundaries do not
+# affect wetland-percentage calculations.
+NWI_WETLAND_INPUTS = [
+   r"D:\Misc\Stream_buffer_data\FL_geodatabase_wetlands\FL_geodatabase_wetlands.gdb\FL_Wetlands"
+]
+
+# Riparian-processing outputs.
+riparian_buffer = os.path.join(output_gdb, "Riparian_Buffer")
+riparian_split_stands = os.path.join(
+    output_gdb,
+    "TreeMap_Stands_Riparian_Split",
+)
+wetland_footprint = os.path.join(output_gdb, "NWI_Wetlands_Dissolved")
+
 
 # ============================================================
 # SEGMENTATION SETTINGS
@@ -90,7 +88,7 @@ MIN_STAND_ACRES = 5.0
 MAX_STAND_ACRES = 200.0
 
 MAX_ITERATIONS = 40
-CONVERGENCE_THRESHOLD = 0.001
+CONVERGENCE_THRESHOLD = 0.01
 MINIMUM_SCORE_IMPROVEMENT = 0.01
 USE_EIGHT_NEIGHBORS = False
 
@@ -115,6 +113,64 @@ SIMILAR_MERGE_MAX_AGE_DIFFERENCE = 10.0  # years
 SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = True
 SIMILAR_MERGE_MIN_SHARED_EDGES = 1
 SIMILAR_MERGE_MAX_PASSES = 50
+
+
+# ============================================================
+# RIPARIAN BUFFER SETTINGS
+# ============================================================
+
+# Set to False to run only the original stand segmentation.
+CREATE_RIPARIAN_STANDS = True
+
+# These are editable first-pass assumptions. They are intentionally stored in
+# one place so other states or later Florida BMP refinements can use different
+# distances without changing the geometry-processing functions.
+FLOWLINE_BUFFER_RULES = {
+    46000: ("Unclassified Stream", 35.0),
+    46003: ("Intermittent Stream", 35.0),
+    46006: ("Perennial Stream", 75.0),
+    46007: ("Ephemeral Stream", 0.0),
+}
+
+WATERBODY_BUFFER_RULES = {
+    39000: ("Unclassified Lake/Pond", 35.0),
+    39001: ("Intermittent Lake/Pond", 35.0),
+    39005: ("Intermittent Lake/Pond", 35.0),
+    39006: ("Intermittent Lake/Pond", 35.0),
+    39004: ("Perennial Lake/Pond", 75.0),
+    39009: ("Perennial Lake/Pond", 75.0),
+    39010: ("Perennial Lake/Pond", 75.0),
+    39011: ("Perennial Lake/Pond", 75.0),
+    39012: ("Perennial Lake/Pond", 75.0),
+}
+
+AREA_BUFFER_RULES = {
+    46000: ("Unclassified Stream/River Area", 35.0),
+    46003: ("Intermittent Stream/River Area", 35.0),
+    46006: ("Perennial Stream/River Area", 75.0),
+    46007: ("Ephemeral Stream/River Area", 0.0),
+    53700: ("Area of Complex Channels", 75.0),
+}
+
+# No minimum-area deletion is performed after the riparian split. Narrow
+# riparian pieces are intentional management units rather than segmentation
+# errors.
+
+
+# ============================================================
+# WETLAND AND MANAGEMENT-CLASS SETTINGS
+# ============================================================
+
+# Classify each original TreeMap stand from all polygons in the listed USFWS
+# National Wetlands Inventory inputs. No attribute filtering is performed.
+# The final riparian-split pieces inherit the original-stand classification.
+CLASSIFY_WETLANDS = True
+WETLAND_MAJORITY_THRESHOLD = 50.0
+
+# Final management codes. Riparian always has first priority.
+UPLAND_MANAGEMENT_CODE = 0
+RIPARIAN_MANAGEMENT_CODE = 1
+WETLAND_MANAGEMENT_CODE = 2
 
 
 # ============================================================
@@ -1076,6 +1132,517 @@ def write_segment_polygons(summary):
 
 
 # ============================================================
+# RIPARIAN BUFFERING AND STAND SPLITTING
+# ============================================================
+
+def _field_name(feature_class, requested_name):
+    """Return the actual field name using a case-insensitive match."""
+    requested_upper = requested_name.upper()
+    for field in arcpy.ListFields(feature_class):
+        if field.name.upper() == requested_upper:
+            return field.name
+    raise RuntimeError(
+        f"Field '{requested_name}' was not found in:\n{feature_class}"
+    )
+
+
+def _delete_if_exists(*paths):
+    for path in paths:
+        if arcpy.Exists(path):
+            arcpy.management.Delete(path)
+
+
+def _add_field_if_missing(feature_class, name, field_type, **kwargs):
+    existing = {field.name.upper() for field in arcpy.ListFields(feature_class)}
+    if name.upper() not in existing:
+        arcpy.management.AddField(feature_class, name, field_type, **kwargs)
+
+
+def _maximum_configured_buffer():
+    distances = []
+    for rules in (
+        FLOWLINE_BUFFER_RULES,
+        WATERBODY_BUFFER_RULES,
+        AREA_BUFFER_RULES,
+    ):
+        distances.extend(float(value[1]) for value in rules.values())
+    return max(distances, default=0.0)
+
+
+def _classify_hydrography(
+    clipped_features,
+    output_features,
+    source_name,
+    rules,
+):
+    """
+    Retain supported FCodes and attach the editable riparian-buffer rule.
+
+    Features assigned a zero-foot distance are removed from the buffering
+    workflow. Their rules remain visible in the configuration dictionaries so
+    they can be enabled later by changing only the distance.
+    """
+    _delete_if_exists(output_features)
+    arcpy.management.CopyFeatures(clipped_features, output_features)
+
+    fcode_field = _field_name(output_features, "FCode")
+    _add_field_if_missing(output_features, "HYDRO_SRC", "TEXT", field_length=20)
+    _add_field_if_missing(output_features, "HYDRO_CLASS", "TEXT", field_length=80)
+    _add_field_if_missing(output_features, "BUFFER_FT", "DOUBLE")
+    _add_field_if_missing(output_features, "BUFFER_TXT", "TEXT", field_length=30)
+    _add_field_if_missing(output_features, "RULE_SOURCE", "TEXT", field_length=80)
+
+    kept = 0
+    removed = 0
+    with arcpy.da.UpdateCursor(
+        output_features,
+        [
+            fcode_field,
+            "HYDRO_SRC",
+            "HYDRO_CLASS",
+            "BUFFER_FT",
+            "BUFFER_TXT",
+            "RULE_SOURCE",
+        ],
+    ) as cursor:
+        for row in cursor:
+            try:
+                fcode = int(row[0])
+            except (TypeError, ValueError):
+                cursor.deleteRow()
+                removed += 1
+                continue
+
+            rule = rules.get(fcode)
+            if rule is None or float(rule[1]) <= 0:
+                cursor.deleteRow()
+                removed += 1
+                continue
+
+            hydro_class, distance_ft = rule
+            row[1] = source_name
+            row[2] = hydro_class
+            row[3] = float(distance_ft)
+            row[4] = f"{float(distance_ft):g} Feet"
+            row[5] = "Editable NHD FCode assumption"
+            cursor.updateRow(row)
+            kept += 1
+
+    message(
+        f"{source_name}: retained {kept:,} bufferable features; "
+        f"excluded {removed:,} unsupported or zero-buffer features"
+    )
+    return kept
+
+
+def _classify_original_stands_as_wetland(stand_aoi, scratch):
+    """
+    Calculate NWI wetland coverage for each original stand.
+
+    Every polygon from every feature class listed in NWI_WETLAND_INPUTS is
+    treated as wetland. Inputs are clipped to the stand footprint, merged, and
+    dissolved before intersection so overlapping state files or polygons are
+    never counted twice. Wetland status is assigned to the original TreeMap
+    stand using a majority threshold, and all later riparian-split pieces
+    inherit that classification through SEG_ID.
+    """
+    for field_name, field_type in (
+        ("WETLAND_AC", "DOUBLE"),
+        ("WETLAND_PCT", "DOUBLE"),
+        ("WETLAND", "SHORT"),
+    ):
+        _add_field_if_missing(segment_polygons, field_name, field_type)
+
+    # Reset fields so rerunning the script cannot retain stale classifications.
+    with arcpy.da.UpdateCursor(
+        segment_polygons,
+        ["WETLAND_AC", "WETLAND_PCT", "WETLAND"],
+    ) as cursor:
+        for row in cursor:
+            row[0] = 0.0
+            row[1] = 0.0
+            row[2] = 0
+            cursor.updateRow(row)
+
+    if not CLASSIFY_WETLANDS:
+        message("Wetland classification is disabled.")
+        _delete_if_exists(wetland_footprint)
+        return
+
+    if not NWI_WETLAND_INPUTS:
+        raise ValueError(
+            "CLASSIFY_WETLANDS is True, but NWI_WETLAND_INPUTS is empty. "
+            "Add at least one NWI polygon feature class or shapefile."
+        )
+
+    missing_inputs = [
+        path for path in NWI_WETLAND_INPUTS if not arcpy.Exists(path)
+    ]
+    if missing_inputs:
+        raise FileNotFoundError(
+            "The following NWI wetland inputs were not found:\n"
+            + "\n".join(missing_inputs)
+        )
+
+    wetland_merged = scratch["wetland_merged"]
+    wetland_intersection = scratch["wetland_intersection"]
+    clip_outputs = []
+
+    _delete_if_exists(wetland_merged, wetland_intersection, wetland_footprint)
+
+    total_source_features = 0
+    for index, wetland_input in enumerate(NWI_WETLAND_INPUTS, start=1):
+        clip_output = os.path.join(output_gdb, f"_nwi_clip_{index:03d}")
+        _delete_if_exists(clip_output)
+        arcpy.analysis.PairwiseClip(wetland_input, stand_aoi, clip_output)
+
+        clipped_count = int(arcpy.management.GetCount(clip_output)[0])
+        total_source_features += clipped_count
+        message(
+            f"NWI input {index}: retained {clipped_count:,} wetland features "
+            f"within the stand footprint"
+        )
+        if clipped_count > 0:
+            clip_outputs.append(clip_output)
+        else:
+            _delete_if_exists(clip_output)
+
+    if not clip_outputs:
+        message("No NWI wetland polygons occurred within the stand area.")
+        return
+
+    if len(clip_outputs) == 1:
+        arcpy.management.CopyFeatures(clip_outputs[0], wetland_merged)
+    else:
+        arcpy.management.Merge(clip_outputs, wetland_merged)
+
+    # Dissolving removes overlap within and between state NWI inputs.
+    arcpy.analysis.PairwiseDissolve(wetland_merged, wetland_footprint)
+    arcpy.analysis.PairwiseIntersect(
+        [segment_polygons, wetland_footprint],
+        wetland_intersection,
+        join_attributes="ALL",
+    )
+
+    seg_id_field = _field_name(wetland_intersection, "SEG_ID")
+    wetland_acres_by_segment = defaultdict(float)
+    with arcpy.da.SearchCursor(
+        wetland_intersection,
+        [seg_id_field, "SHAPE@"],
+    ) as cursor:
+        for segment_id, geometry in cursor:
+            if segment_id is None or geometry is None:
+                continue
+            wetland_acres_by_segment[int(segment_id)] += float(
+                geometry.getArea("GEODESIC", "ACRES")
+            )
+
+    original_seg_id = _field_name(segment_polygons, "SEG_ID")
+    wetland_stands = 0
+    wetland_stand_acres = 0.0
+    total_wetland_overlap = 0.0
+
+    with arcpy.da.UpdateCursor(
+        segment_polygons,
+        [
+            original_seg_id,
+            "SHAPE@",
+            "WETLAND_AC",
+            "WETLAND_PCT",
+            "WETLAND",
+        ],
+    ) as cursor:
+        for row in cursor:
+            segment_id = int(row[0])
+            stand_acres = float(row[1].getArea("GEODESIC", "ACRES"))
+            wetland_acres = min(
+                wetland_acres_by_segment.get(segment_id, 0.0),
+                stand_acres,
+            )
+            wetland_pct = (
+                100.0 * wetland_acres / stand_acres
+                if stand_acres > 0
+                else 0.0
+            )
+            is_wetland = int(wetland_pct >= WETLAND_MAJORITY_THRESHOLD)
+
+            row[2] = wetland_acres
+            row[3] = wetland_pct
+            row[4] = is_wetland
+            cursor.updateRow(row)
+
+            total_wetland_overlap += wetland_acres
+            if is_wetland:
+                wetland_stands += 1
+                wetland_stand_acres += stand_acres
+
+    message(
+        f"NWI wetland features used after clipping: "
+        f"{total_source_features:,}; overlap with stands: "
+        f"{total_wetland_overlap:,.2f} acres"
+    )
+    message(
+        f"Original stands classified as wetland at "
+        f">= {WETLAND_MAJORITY_THRESHOLD:g}% coverage: "
+        f"{wetland_stands:,} ({wetland_stand_acres:,.2f} stand acres)"
+    )
+
+    # Intermediate state clips are not needed after the dissolved QA layer is
+    # created. The dissolved NWI_Wetlands_Dissolved output is retained.
+    _delete_if_exists(*clip_outputs, wetland_merged, wetland_intersection)
+
+
+def _assign_management_classes(feature_class):
+    """Assign final management class with Riparian > Wetland > Upland."""
+    _add_field_if_missing(feature_class, "MGMT_CLASS", "SHORT")
+    _add_field_if_missing(feature_class, "MGMT_TYPE", "TEXT", field_length=20)
+
+    fields = ["RIPARIAN", "WETLAND", "MGMT_CLASS", "MGMT_TYPE"]
+    counts = Counter()
+    acres = defaultdict(float)
+
+    with arcpy.da.UpdateCursor(feature_class, fields + ["Acres"]) as cursor:
+        for row in cursor:
+            riparian = int(row[0] or 0)
+            wetland = int(row[1] or 0)
+
+            if riparian == 1:
+                code = RIPARIAN_MANAGEMENT_CODE
+                label = "Riparian"
+            elif wetland == 1:
+                code = WETLAND_MANAGEMENT_CODE
+                label = "Wetland"
+            else:
+                code = UPLAND_MANAGEMENT_CODE
+                label = "Upland"
+
+            row[2] = code
+            row[3] = label
+            cursor.updateRow(row)
+            counts[label] += 1
+            acres[label] += float(row[4] or 0.0)
+
+    message("Final management classes:")
+    for label in ("Upland", "Riparian", "Wetland"):
+        message(
+            f"  {label}: {counts[label]:,} pieces "
+            f"({acres[label]:,.2f} acres)"
+        )
+
+
+def _calculate_split_fields(feature_class):
+    """Assign stable parent labels and recalculate acreage from geometry."""
+    seg_id_field = _field_name(feature_class, "SEG_ID")
+    _add_field_if_missing(feature_class, "FINAL_ID", "LONG")
+    _add_field_if_missing(feature_class, "ParentID", "TEXT", field_length=40)
+    _add_field_if_missing(feature_class, "Acres", "DOUBLE")
+
+    with arcpy.da.UpdateCursor(
+        feature_class,
+        ["OID@", seg_id_field, "FINAL_ID", "ParentID", "Acres", "SHAPE@"],
+    ) as cursor:
+        for row in cursor:
+            row[2] = int(row[0])
+            row[3] = f"SEG_{int(row[1])}"
+            row[4] = float(row[5].getArea("GEODESIC", "ACRES"))
+            cursor.updateRow(row)
+
+
+def create_riparian_stands():
+    """
+    Create a dissolved NHD-based riparian footprint and split finished stands.
+
+    Polygon water features are buffered from their shoreline. Flowlines are
+    buffered from their centerline. Overlapping source buffers are dissolved
+    into one binary footprint before the stands are split, preventing duplicate
+    stand acreage where multiple NHD layers represent the same water feature.
+    """
+    required = [segment_polygons, nhd_flowline, nhd_area, nhd_waterbody]
+    missing = [path for path in required if not arcpy.Exists(path)]
+    if missing:
+        raise FileNotFoundError(
+            "The following riparian inputs were not found:\n" + "\n".join(missing)
+        )
+
+    scratch = {
+        "aoi_core": os.path.join(output_gdb, "_rip_aoi_core"),
+        "aoi": os.path.join(output_gdb, "_rip_aoi"),
+        "flow_clip": os.path.join(output_gdb, "_rip_flow_clip"),
+        "area_clip": os.path.join(output_gdb, "_rip_area_clip"),
+        "water_clip": os.path.join(output_gdb, "_rip_water_clip"),
+        "flow_class": os.path.join(output_gdb, "NHD_Flowline_Buffer_Rules"),
+        "area_class": os.path.join(output_gdb, "NHD_Area_Buffer_Rules"),
+        "water_class": os.path.join(output_gdb, "NHD_Waterbody_Buffer_Rules"),
+        "flow_buffer": os.path.join(output_gdb, "_rip_flow_buffer"),
+        "area_buffer": os.path.join(output_gdb, "_rip_area_buffer"),
+        "water_buffer": os.path.join(output_gdb, "_rip_water_buffer"),
+        "wetland_merged": os.path.join(output_gdb, "_nwi_merged"),
+        "wetland_intersection": os.path.join(output_gdb, "_nwi_intersection"),
+        "merged_buffer": os.path.join(output_gdb, "_rip_merged_buffer"),
+        "riparian_piece": os.path.join(output_gdb, "_riparian_piece"),
+        "nonriparian_piece": os.path.join(output_gdb, "_nonriparian_piece"),
+        "merged_stands": os.path.join(output_gdb, "_riparian_merged_stands"),
+    }
+
+    _delete_if_exists(
+        *scratch.values(),
+        riparian_buffer,
+        riparian_split_stands,
+        wetland_footprint,
+    )
+
+    maximum_buffer = _maximum_configured_buffer()
+    if maximum_buffer <= 0:
+        raise ValueError("All configured riparian buffer distances are zero.")
+
+    message("Creating a hydrography search area around the stand footprint...")
+    arcpy.analysis.PairwiseDissolve(segment_polygons, scratch["aoi_core"])
+    arcpy.analysis.PairwiseBuffer(
+        scratch["aoi_core"],
+        scratch["aoi"],
+        f"{maximum_buffer:g} Feet",
+        dissolve_option="ALL",
+        method="PLANAR",
+    )
+
+    # Clip the national layers first so all later operations are local.
+    message("Clipping NHD layers to the buffered stand footprint...")
+    arcpy.analysis.PairwiseClip(nhd_flowline, scratch["aoi"], scratch["flow_clip"])
+    arcpy.analysis.PairwiseClip(nhd_area, scratch["aoi"], scratch["area_clip"])
+    arcpy.analysis.PairwiseClip(nhd_waterbody, scratch["aoi"], scratch["water_clip"])
+
+    message("Classifying original stands from USFWS NWI wetland coverage...")
+    _classify_original_stands_as_wetland(scratch["aoi_core"], scratch)
+
+    counts = {
+        "flow": _classify_hydrography(
+            scratch["flow_clip"],
+            scratch["flow_class"],
+            "Flowline",
+            FLOWLINE_BUFFER_RULES,
+        ),
+        "area": _classify_hydrography(
+            scratch["area_clip"],
+            scratch["area_class"],
+            "Area",
+            AREA_BUFFER_RULES,
+        ),
+        "water": _classify_hydrography(
+            scratch["water_clip"],
+            scratch["water_class"],
+            "Waterbody",
+            WATERBODY_BUFFER_RULES,
+        ),
+    }
+
+    buffer_outputs = []
+    for key, classified_key, buffer_key in (
+        ("flow", "flow_class", "flow_buffer"),
+        ("area", "area_class", "area_buffer"),
+        ("water", "water_class", "water_buffer"),
+    ):
+        if counts[key] == 0:
+            continue
+        message(f"Buffering classified NHD {key} features...")
+        arcpy.analysis.PairwiseBuffer(
+            scratch[classified_key],
+            scratch[buffer_key],
+            "BUFFER_TXT",
+            dissolve_option="NONE",
+            method="PLANAR",
+        )
+        buffer_outputs.append(scratch[buffer_key])
+
+    if not buffer_outputs:
+        raise RuntimeError(
+            "No supported NHD features occurred near the stand polygons. "
+            "Review the input extent and FCode rules."
+        )
+
+    arcpy.management.Merge(buffer_outputs, scratch["merged_buffer"])
+    arcpy.analysis.PairwiseDissolve(scratch["merged_buffer"], riparian_buffer)
+
+    message("Splitting stands into riparian and non-riparian pieces...")
+    arcpy.analysis.PairwiseIntersect(
+        [segment_polygons, riparian_buffer],
+        scratch["riparian_piece"],
+        join_attributes="ALL",
+    )
+    arcpy.analysis.PairwiseErase(
+        segment_polygons,
+        riparian_buffer,
+        scratch["nonriparian_piece"],
+    )
+
+    for feature_class, value, label in (
+        (scratch["riparian_piece"], 1, "Riparian Buffer"),
+        (scratch["nonriparian_piece"], 0, "Non-Riparian"),
+    ):
+        _add_field_if_missing(feature_class, "RIPARIAN", "SHORT")
+        _add_field_if_missing(feature_class, "RIP_CLASS", "TEXT", field_length=40)
+        arcpy.management.CalculateField(
+            feature_class,
+            "RIPARIAN",
+            str(value),
+            "PYTHON3",
+        )
+        arcpy.management.CalculateField(
+            feature_class,
+            "RIP_CLASS",
+            repr(label),
+            "PYTHON3",
+        )
+
+    arcpy.management.Merge(
+        [scratch["riparian_piece"], scratch["nonriparian_piece"]],
+        scratch["merged_stands"],
+    )
+    arcpy.management.MultipartToSinglepart(
+        scratch["merged_stands"],
+        riparian_split_stands,
+    )
+    _calculate_split_fields(riparian_split_stands)
+    _assign_management_classes(riparian_split_stands)
+
+    riparian_count = 0
+    nonriparian_count = 0
+    riparian_acres = 0.0
+    nonriparian_acres = 0.0
+    with arcpy.da.SearchCursor(
+        riparian_split_stands,
+        ["RIPARIAN", "Acres"],
+    ) as cursor:
+        for is_riparian, acres in cursor:
+            if int(is_riparian) == 1:
+                riparian_count += 1
+                riparian_acres += float(acres or 0.0)
+            else:
+                nonriparian_count += 1
+                nonriparian_acres += float(acres or 0.0)
+
+    message(f"Riparian pieces: {riparian_count:,} ({riparian_acres:,.2f} acres)")
+    message(
+        f"Non-riparian pieces: {nonriparian_count:,} "
+        f"({nonriparian_acres:,.2f} acres)"
+    )
+    message(f"Combined riparian buffer written:\n{riparian_buffer}")
+    if CLASSIFY_WETLANDS and arcpy.Exists(wetland_footprint):
+        message(f"Dissolved NWI wetland footprint written:\n{wetland_footprint}")
+    message(f"Final management-classified stands written:\n{riparian_split_stands}")
+
+    # Keep the three classified source layers for QA and future rule changes,
+    # but remove temporary clips, buffers, and intermediate split layers.
+    keep = {
+        scratch["flow_class"],
+        scratch["area_class"],
+        scratch["water_class"],
+    }
+    for path in scratch.values():
+        if path not in keep and arcpy.Exists(path):
+            arcpy.management.Delete(path)
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -1308,6 +1875,12 @@ def main():
     message("=" * 60)
     write_segment_polygons(summary)
     message(f"Segment polygons written:\n{segment_polygons}")
+
+    if CREATE_RIPARIAN_STANDS:
+        message("=" * 60)
+        message("CREATING RIPARIAN BUFFERS AND SPLIT STANDS")
+        message("=" * 60)
+        create_riparian_stands()
 
     message("=" * 60)
     message("SEGMENTATION COMPLETE")
