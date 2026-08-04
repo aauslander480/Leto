@@ -1,247 +1,402 @@
 import os
+import re
 import shutil
 import sqlite3
+from datetime import datetime
+
 import pandas as pd
 
 # -------------------------------------------------------
 # USER INPUTS
 # -------------------------------------------------------
 
-#This folder is the one which houses the csv outputs from the last script 'LETO_CSV_PIPELINE'
+# Folder containing FVS_StandInit.csv and FVS_TreeInit.csv.
+input_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
 
-out_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
+# Parent folder where one uniquely named folder will be created for each run.
+runs_root_folder = r"D:\forest_condition_2026\FVS\FVS_Database_Runs"
 
-#Download a blank FVS .db here and add the path to it: https://www.fs.usda.gov/fvs/software/data.shtml
+# Descriptive label included in the run-folder name.
+RUN_NAME = "Hard_Ownership_Boundaries"
+
+# Copy the principal CSV and QA inputs into the run folder for reproducibility.
+COPY_RUN_INPUTS = True
 
 blank_db = r"D:\forest_condition_2026\FVS\FVS_Data.db"
-
-#Name the final output, maybe be worth importing datetime to keep track of these if we run a lot of them
-
-output_db_name = "FVS_Inventory_ManagementUnits_weighted.db"
-
-#These should ideally stay the same
-
 stand_csv_name = "FVS_StandInit.csv"
 tree_csv_name = "FVS_TreeInit.csv"
-
-# The following lines affect which version of FVS will run. For example 'SN' = southern FVS. 
-# Each state has a unique fvs code as well 
+output_name_prefix = "FVS_Inventory"
 
 fvs_variant = "SN"
-fvs_state_code = 12       # Florida
+fvs_state_code = 12
 default_inv_year = 2022
 stand_group_name = "All_Stands"
 
-# FVS sampling design for TREE_COUNT already in trees per acre
-#These setting affect how FVS calculates the inputed data. Any changes can cause major inaccuracy.
-# After much testing I have found these to be correct for what we are doing here.
-
+# FVS sampling design. TREE_COUNT is already expressed as trees per acre.
 basal_area_factor = -1
 inv_plot_size = 1
 brk_dbh = 0
 num_plots = 1
 nonstk_plots = 0
 
-output_db = os.path.join(out_folder, output_db_name)
-stand_csv = os.path.join(out_folder, stand_csv_name)
-tree_csv = os.path.join(out_folder, tree_csv_name)
+# Files copied into Inputs when present.
+run_input_names = [
+    stand_csv_name,
+    tree_csv_name,
+    "Segment_PLT_CN_Weights_Filtered.csv",
+    "Segment_FVS_Stands_No_Live_Trees.csv",
+    "QA_FVS_Run_Summary.txt",
+    "QA_Missing_FVS_Species.csv",
+    "QA_Missing_FVS_Species_By_Stand.csv",
+]
 
-# -------------------------------------------------------
-# COPY BLANK DATABASE
-# -------------------------------------------------------
+stand_csv = os.path.join(input_folder, stand_csv_name)
+tree_csv = os.path.join(input_folder, tree_csv_name)
 
-if os.path.exists(output_db):
-    os.remove(output_db)
 
-shutil.copy2(blank_db, output_db)
+def safe_filename(value):
+    """Return a Windows-safe file or folder name."""
+    text = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value).strip())
+    return text.strip("_") or "Unknown"
 
-print("Copied blank database to:")
-print(output_db)
 
-# -------------------------------------------------------
-# READ CSVs
-# -------------------------------------------------------
+def create_unique_run_folder():
+    """Create a timestamped folder that will never overwrite a prior run."""
+    os.makedirs(runs_root_folder, exist_ok=True)
 
-stands = pd.read_csv(stand_csv, dtype=str)
-trees = pd.read_csv(tree_csv, dtype=str)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = f"{timestamp}_{safe_filename(RUN_NAME)}"
+    run_folder = os.path.join(runs_root_folder, base_name)
 
-# -------------------------------------------------------
-# PREPARE STANDS
-# -------------------------------------------------------
+    counter = 2
+    while os.path.exists(run_folder):
+        run_folder = os.path.join(
+            runs_root_folder,
+            f"{base_name}_{counter}",
+        )
+        counter += 1
 
-stand_out = pd.DataFrame()
+    databases_folder = os.path.join(run_folder, "Databases")
+    inputs_folder = os.path.join(run_folder, "Inputs")
 
-stand_out["STAND_ID"] = stands["STAND_ID"]
-stand_out["STAND_CN"] = stands["STAND_ID"]
-stand_out["VARIANT"] = fvs_variant
+    os.makedirs(databases_folder)
+    os.makedirs(inputs_folder)
 
-stand_out["INV_YEAR"] = pd.to_numeric(
-    stands["INV_YEAR"],
-    errors="coerce"
-).fillna(default_inv_year).astype(int)
+    return run_folder, databases_folder, inputs_folder
 
-stand_out["STATE"] = fvs_state_code
-stand_out["GROUPS"] = stand_group_name
-stand_out["LOCATION"] = stands["MU_ID"].astype(str)
 
-# Initial stand age from FIA dominant-condition STDAGE
-if "AGE" not in stands.columns:
-    raise ValueError(
-        "FVS_StandInit.csv does not contain an AGE column. "
-        "Run the updated LETO_CSV_PIPELINE first."
+def require_file(path, label):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{label} not found:\n{path}")
+
+
+def prepare_stands(stands):
+    required = {"STAND_ID", "INV_YEAR", "MU_ID", "AGE", "DB_GROUP"}
+    missing = required - set(stands.columns)
+    if missing:
+        raise ValueError(
+            f"FVS_StandInit.csv is missing fields: {sorted(missing)}"
+        )
+
+    out = pd.DataFrame()
+    out["STAND_ID"] = stands["STAND_ID"]
+    out["STAND_CN"] = stands["STAND_ID"]
+    out["VARIANT"] = fvs_variant
+    out["INV_YEAR"] = (
+        pd.to_numeric(stands["INV_YEAR"], errors="coerce")
+        .fillna(default_inv_year)
+        .astype(int)
+    )
+    out["STATE"] = fvs_state_code
+    out["GROUPS"] = stand_group_name
+    out["LOCATION"] = stands["MU_ID"].astype(str)
+    out["AGE"] = (
+        pd.to_numeric(stands["AGE"], errors="coerce")
+        .round()
+        .astype("Int64")
     )
 
-stand_out["AGE"] = pd.to_numeric(
-    stands["AGE"],
-    errors="coerce"
-).round().astype("Int64")
+    # Validated sampling design for weighted TREE_COUNT expressed as TPA.
+    out["BASAL_AREA_FACTOR"] = basal_area_factor
+    out["INV_PLOT_SIZE"] = inv_plot_size
+    out["BRK_DBH"] = brk_dbh
+    out["NUM_PLOTS"] = num_plots
+    out["NONSTK_PLOTS"] = nonstk_plots
 
-# ------------------------------------------------------------------
-# FVS Sampling Design
-#
-# BASAL_AREA_FACTOR = -1 tells FVS that TREE_COUNT is already
-# expressed as Trees Per Acre (TPA). If left blank, FVS will
-# re-expand trees, producing greatly inflated stand volumes.
-# ------------------------------------------------------------------
-
-stand_out["BASAL_AREA_FACTOR"] = basal_area_factor
-stand_out["INV_PLOT_SIZE"] = inv_plot_size
-stand_out["BRK_DBH"] = brk_dbh
-stand_out["NUM_PLOTS"] = num_plots
-stand_out["NONSTK_PLOTS"] = nonstk_plots
-
-# -------------------------------------------------------
-# PREPARE TREES
-# -------------------------------------------------------
-
-tree_out = pd.DataFrame()
-
-# Stand identifiers
-tree_out["STAND_ID"] = trees["STAND_ID"]
-tree_out["STAND_CN"] = trees["STAND_ID"]
-
-# Plot identifiers
-tree_out["PLOT_ID"] = 1
-tree_out["STANDPLOT_ID"] = trees["STAND_ID"].astype(str) + "_1"
-tree_out["STANDPLOT_CN"] = tree_out["STANDPLOT_ID"]
-
-# Create sequential tree IDs within each stand
-tree_out["TREE_ID"] = (
-    trees.groupby("STAND_ID").cumcount() + 1
-)
-
-# Tree attributes
-tree_out["TREE_COUNT"] = pd.to_numeric(
-    trees["TREE_COUNT"],
-    errors="coerce"
-)
-
-tree_out["SPECIES"] = trees["SPECIES"].astype(str)
-
-tree_out["DIAMETER"] = pd.to_numeric(
-    trees["DIAMETER"],
-    errors="coerce"
-)
-
-tree_out["HT"] = pd.to_numeric(
-    trees["HT"],
-    errors="coerce"
-)
-
-tree_out["CRRATIO"] = pd.to_numeric(
-    trees["CRRATIO"],
-    errors="coerce"
-)
-
-# Remove unusable records
-tree_out = tree_out.dropna(subset=[
-    "STAND_ID",
-    "STAND_CN",
-    "STANDPLOT_CN",
-    "STANDPLOT_ID",
-    "PLOT_ID",
-    "TREE_ID",
-    "TREE_COUNT",
-    "SPECIES",
-    "DIAMETER"
-]).copy()
-
-# Keep only columns that exist in FVS_TreeInit
-tree_out = tree_out[[
-    "STAND_ID",
-    "STAND_CN",
-    "STANDPLOT_CN",
-    "STANDPLOT_ID",
-    "PLOT_ID",
-    "TREE_ID",
-    "TREE_COUNT",
-    "SPECIES",
-    "DIAMETER",
-    "HT",
-    "CRRATIO"
-]].copy()
+    return out
 
 
-# -------------------------------------------------------
-# WRITE TO SQLITE DATABASE
-# -------------------------------------------------------
+def prepare_trees(trees):
+    required_input = {
+        "STAND_ID",
+        "TREE_COUNT",
+        "SPECIES",
+        "DIAMETER",
+        "HT",
+        "CRRATIO",
+    }
+    missing = required_input - set(trees.columns)
+    if missing:
+        raise ValueError(
+            f"FVS_TreeInit.csv is missing fields: {sorted(missing)}"
+        )
 
-conn = sqlite3.connect(output_db)
+    out = pd.DataFrame()
+    out["STAND_ID"] = trees["STAND_ID"]
+    out["STAND_CN"] = trees["STAND_ID"]
+    out["PLOT_ID"] = 1
+    out["STANDPLOT_ID"] = trees["STAND_ID"].astype(str) + "_1"
+    out["STANDPLOT_CN"] = out["STANDPLOT_ID"]
+    out["TREE_ID"] = trees.groupby("STAND_ID").cumcount() + 1
+    out["TREE_COUNT"] = pd.to_numeric(
+        trees["TREE_COUNT"], errors="coerce"
+    )
+    out["SPECIES"] = trees["SPECIES"].astype(str)
+    out["DIAMETER"] = pd.to_numeric(
+        trees["DIAMETER"], errors="coerce"
+    )
+    out["HT"] = pd.to_numeric(trees["HT"], errors="coerce")
+    out["CRRATIO"] = pd.to_numeric(
+        trees["CRRATIO"], errors="coerce"
+    )
 
-# Clear existing inventory tables
-conn.execute("DELETE FROM FVS_TreeInit")
-conn.execute("DELETE FROM FVS_StandInit")
-conn.execute("DELETE FROM FVS_PlotInit")
+    required_output = [
+        "STAND_ID",
+        "STAND_CN",
+        "STANDPLOT_CN",
+        "STANDPLOT_ID",
+        "PLOT_ID",
+        "TREE_ID",
+        "TREE_COUNT",
+        "SPECIES",
+        "DIAMETER",
+    ]
+    out = out.dropna(subset=required_output).copy()
 
-stand_out.to_sql(
-    "FVS_StandInit",
-    conn,
-    if_exists="append",
-    index=False
-)
+    return out[
+        [
+            "STAND_ID",
+            "STAND_CN",
+            "STANDPLOT_CN",
+            "STANDPLOT_ID",
+            "PLOT_ID",
+            "TREE_ID",
+            "TREE_COUNT",
+            "SPECIES",
+            "DIAMETER",
+            "HT",
+            "CRRATIO",
+        ]
+    ]
 
-tree_out.to_sql(
-    "FVS_TreeInit",
-    conn,
-    if_exists="append",
-    index=False
-)
 
-conn.commit()
+def write_database(output_db, stand_out, tree_out):
+    shutil.copy2(blank_db, output_db)
 
-# -------------------------------------------------------
-# CHECK COUNTS
-# -------------------------------------------------------
+    with sqlite3.connect(output_db) as conn:
+        conn.execute("DELETE FROM FVS_TreeInit")
+        conn.execute("DELETE FROM FVS_StandInit")
+        conn.execute("DELETE FROM FVS_PlotInit")
 
-stand_count = conn.execute(
-    "SELECT COUNT(*) FROM FVS_StandInit"
-).fetchone()[0]
+        stand_out.to_sql(
+            "FVS_StandInit",
+            conn,
+            if_exists="append",
+            index=False,
+        )
+        tree_out.to_sql(
+            "FVS_TreeInit",
+            conn,
+            if_exists="append",
+            index=False,
+        )
+        conn.commit()
 
-tree_count = conn.execute(
-    "SELECT COUNT(*) FROM FVS_TreeInit"
-).fetchone()[0]
 
-age_check = pd.read_sql_query(
-    """
-    SELECT
-        COUNT(*) AS TOTAL_STANDS,
-        COUNT(AGE) AS STANDS_WITH_AGE,
-        MIN(AGE) AS MIN_AGE,
-        AVG(AGE) AS MEAN_AGE,
-        MAX(AGE) AS MAX_AGE
-    FROM FVS_StandInit
-    """,
-    conn
-)
+def copy_run_inputs(inputs_folder):
+    copied = []
 
-conn.close()
+    if not COPY_RUN_INPUTS:
+        return copied
 
-print("Database created successfully.")
-print("Stand records:", stand_count)
-print("Tree records:", tree_count)
+    for name in run_input_names:
+        source = os.path.join(input_folder, name)
+        if not os.path.exists(source):
+            continue
 
-print("\nAge values imported to FVS:")
-print(age_check.to_string(index=False))
+        destination = os.path.join(inputs_folder, name)
+        print(f"Copying run input: {name}")
+        shutil.copy2(source, destination)
+        copied.append(destination)
 
-print(output_db)
+    return copied
 
+
+def write_run_settings(
+    settings_path,
+    run_folder,
+    summaries,
+    copied_inputs,
+    started_at,
+):
+    finished_at = datetime.now()
+
+    total_stands = sum(item["STANDS"] for item in summaries)
+    total_trees = sum(item["TREE_RECORDS"] for item in summaries)
+    total_acres = sum(
+        item["ACRES"]
+        for item in summaries
+        if pd.notna(item["ACRES"])
+    )
+
+    lines = [
+        "LETO FVS DATABASE RUN",
+        "=" * 70,
+        f"Run name: {RUN_NAME}",
+        f"Run folder: {run_folder}",
+        f"Started: {started_at:%Y-%m-%d %H:%M:%S}",
+        f"Finished: {finished_at:%Y-%m-%d %H:%M:%S}",
+        "",
+        "FVS SETTINGS",
+        "-" * 70,
+        f"Variant: {fvs_variant}",
+        f"State code: {fvs_state_code}",
+        f"Default inventory year: {default_inv_year}",
+        f"Stand group: {stand_group_name}",
+        "",
+        "FVS SAMPLING DESIGN",
+        "-" * 70,
+        f"BASAL_AREA_FACTOR = {basal_area_factor}",
+        f"INV_PLOT_SIZE = {inv_plot_size}",
+        f"BRK_DBH = {brk_dbh}",
+        f"NUM_PLOTS = {num_plots}",
+        f"NONSTK_PLOTS = {nonstk_plots}",
+        "",
+        "RUN TOTALS",
+        "-" * 70,
+        f"Database groups: {len(summaries):,}",
+        f"Total stands: {total_stands:,}",
+        f"Total acres: {total_acres:,.2f}",
+        f"Total tree records: {total_trees:,}",
+        "",
+        "COPIED INPUTS",
+        "-" * 70,
+    ]
+
+    if copied_inputs:
+        lines.extend(copied_inputs)
+    else:
+        lines.append("None")
+
+    lines.extend(["", "DATABASE GROUPS", "-" * 70])
+
+    for item in summaries:
+        lines.append(
+            f"{item['DB_GROUP']}: "
+            f"{item['STANDS']:,} stands; "
+            f"{item['ACRES']:,.2f} acres; "
+            f"{item['TREE_RECORDS']:,} tree records"
+        )
+
+    with open(settings_path, "w", encoding="utf-8") as file:
+        file.write("\n".join(lines) + "\n")
+
+
+def main():
+    started_at = datetime.now()
+
+    require_file(blank_db, "Blank FVS database")
+    require_file(stand_csv, "FVS stand CSV")
+    require_file(tree_csv, "FVS tree CSV")
+
+    run_folder, databases_folder, inputs_folder = (
+        create_unique_run_folder()
+    )
+
+    print("=" * 72)
+    print("CREATING UNIQUE FVS DATABASE RUN")
+    print("=" * 72)
+    print(f"Run folder: {run_folder}")
+
+    print("Reading FVS input CSV files...")
+    stands = pd.read_csv(stand_csv, dtype=str)
+    trees = pd.read_csv(tree_csv, dtype=str)
+
+    stands["DB_GROUP"] = (
+        stands["DB_GROUP"]
+        .fillna("Unknown")
+        .str.strip()
+        .replace("", "Unknown")
+    )
+
+    summaries = []
+
+    for group_name, group_stands in stands.groupby(
+        "DB_GROUP", sort=True
+    ):
+        ids = set(group_stands["STAND_ID"].astype(str))
+        group_trees = trees[
+            trees["STAND_ID"].astype(str).isin(ids)
+        ].copy()
+
+        stand_out = prepare_stands(group_stands)
+        tree_out = prepare_trees(group_trees)
+
+        output_db = os.path.join(
+            databases_folder,
+            f"{output_name_prefix}_{safe_filename(group_name)}.db",
+        )
+
+        write_database(output_db, stand_out, tree_out)
+
+        if "Acres" in group_stands.columns:
+            acres = pd.to_numeric(
+                group_stands["Acres"], errors="coerce"
+            ).sum()
+        else:
+            acres = float("nan")
+
+        summary = {
+            "DB_GROUP": group_name,
+            "STANDS": len(stand_out),
+            "ACRES": acres,
+            "TREE_RECORDS": len(tree_out),
+            "OUTPUT_DB": output_db,
+        }
+        summaries.append(summary)
+
+        print(f"Created: {output_db}")
+        print(
+            f"  Stands: {len(stand_out):,}; "
+            f"acres: {acres:,.2f}; "
+            f"trees: {len(tree_out):,}"
+        )
+
+    summary_csv = os.path.join(
+        run_folder,
+        "FVS_Database_Group_Summary.csv",
+    )
+    pd.DataFrame(summaries).to_csv(summary_csv, index=False)
+
+    copied_inputs = copy_run_inputs(inputs_folder)
+
+    settings_path = os.path.join(run_folder, "Run_Settings.txt")
+    write_run_settings(
+        settings_path,
+        run_folder,
+        summaries,
+        copied_inputs,
+        started_at,
+    )
+
+    print("=" * 72)
+    print("DATABASE RUN COMPLETE")
+    print("=" * 72)
+    print(f"Run folder: {run_folder}")
+    print(f"Databases: {databases_folder}")
+    print(f"Summary: {summary_csv}")
+    print(f"Settings: {settings_path}")
+
+
+if __name__ == "__main__":
+    main()
