@@ -72,10 +72,14 @@ NWI_WETLAND_INPUTS = [
 
 # Riparian-processing outputs.
 riparian_buffer = os.path.join(output_gdb, "Riparian_Buffer")
-riparian_split_stands = os.path.join(
+management_units_final = os.path.join(
     output_gdb,
-    "TreeMap_Stands_Riparian_Split",
+    "ManagementUnits_Final",
 )
+# Backward-compatible internal alias used by the riparian functions.
+riparian_split_stands = management_units_final
+ownership_dissolved = os.path.join(output_gdb, "Ownership_Classes_Dissolved")
+ownership_raster = os.path.join(output_folder, "Ownership_Classes.tif")
 wetland_footprint = os.path.join(output_gdb, "NWI_Wetlands_Dissolved")
 
 
@@ -83,9 +87,9 @@ wetland_footprint = os.path.join(output_gdb, "NWI_Wetlands_Dissolved")
 # SEGMENTATION SETTINGS
 # ============================================================
 
-INITIAL_SEED_ACRES = 40.0
+INITIAL_SEED_ACRES = 100.0
 MIN_STAND_ACRES = 5.0
-MAX_STAND_ACRES = 200.0
+MAX_STAND_ACRES = 300.0
 
 MAX_ITERATIONS = 40
 CONVERGENCE_THRESHOLD = 0.01
@@ -164,13 +168,44 @@ AREA_BUFFER_RULES = {
 # Classify each original TreeMap stand from all polygons in the listed USFWS
 # National Wetlands Inventory inputs. No attribute filtering is performed.
 # The final riparian-split pieces inherit the original-stand classification.
-CLASSIFY_WETLANDS = True
+CLASSIFY_WETLANDS = False
 WETLAND_MAJORITY_THRESHOLD = 50.0
 
 # Final management codes. Riparian always has first priority.
 UPLAND_MANAGEMENT_CODE = 0
 RIPARIAN_MANAGEMENT_CODE = 1
 WETLAND_MANAGEMENT_CODE = 2
+
+
+
+
+# ============================================================
+# PARCEL OWNERSHIP SETTINGS
+# ============================================================
+
+# Update this path to the extracted parcel feature class on your computer.
+PARCEL_OWNERSHIP_LAYER = (
+    r"D:\forest_condition_2026\basemap\FL_5_Co_Parcels (3)\FL_5_Co_Parcels\FL_5_Co_Parcels.gdb\FL_5_Co_Parcels"
+)
+PARCEL_OWNER_FIELD = "owner"  # Located case-insensitively.
+USE_OWNERSHIP_HARD_BOUNDARIES = True
+
+# Ownership is classified by the suffix after the first hyphen. This means
+# both Forest-* and Other-* labels enter the same ownership class.
+OWNERSHIP_SUFFIX_GROUPS = {
+    "private": (1, "Private"),
+    "company": (2, "Corporate"),
+    "reit": (2, "Corporate"),
+    "timo": (2, "Corporate"),
+    "federal": (3, "Federal"),
+    "state": (4, "State"),
+    "county": (5, "County"),
+    "ngo": (6, "NGO"),
+    "misc": (7, "Other"),
+}
+
+UNKNOWN_OWNERSHIP_CODE = 0
+UNKNOWN_OWNERSHIP_TYPE = "Unknown"
 
 
 # ============================================================
@@ -275,7 +310,7 @@ def connectivity_structure():
     return np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.int8)
 
 
-def create_initial_segments(valid_mask, cells_per_seed):
+def create_initial_segments(valid_mask, cells_per_seed, ownership):
     rows, cols = valid_mask.shape
     block_side = max(1, int(round(math.sqrt(cells_per_seed))))
     labels = np.zeros((rows, cols), dtype=np.int32)
@@ -289,11 +324,16 @@ def create_initial_segments(valid_mask, cells_per_seed):
             block_mask = valid_mask[row_start:row_end, col_start:col_end]
             if not np.any(block_mask):
                 continue
-            local_labels, component_count = ndimage.label(block_mask, structure=structure)
+            block_owner = ownership[row_start:row_end, col_start:col_end]
             target = labels[row_start:row_end, col_start:col_end]
-            positive = local_labels > 0
-            target[positive] = local_labels[positive] + next_id - 1
-            next_id += component_count
+            for owner_code in np.unique(block_owner[block_mask]):
+                owner_mask = block_mask & (block_owner == owner_code)
+                local_labels, component_count = ndimage.label(
+                    owner_mask, structure=structure
+                )
+                positive = local_labels > 0
+                target[positive] = local_labels[positive] + next_id - 1
+                next_id += component_count
 
     return labels
 
@@ -422,7 +462,24 @@ def assignment_cost_vector(
     return cost
 
 
-def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type):
+def segment_categorical_mode(labels, values):
+    """Return the dominant categorical value for each segment ID."""
+    valid = labels > 0
+    ids = labels[valid].astype(np.int64, copy=False)
+    max_id = int(ids.max()) if ids.size else 0
+    categories = values[valid].astype(np.int64, copy=False)
+    unique_values, compact = np.unique(categories, return_inverse=True)
+    n_values = len(unique_values)
+    if n_values == 0:
+        return np.zeros(max_id + 1, dtype=np.int32)
+    combined = ids * n_values + compact
+    counts = np.bincount(
+        combined, minlength=(max_id + 1) * n_values
+    ).reshape(max_id + 1, n_values)
+    return unique_values[np.argmax(counts, axis=1)].astype(np.int32)
+
+
+def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type, ownership):
     """
     Synchronously reassign all boundary cells using compact vector arrays.
 
@@ -442,6 +499,7 @@ def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type):
             feature_arrays,
             forest_type_int,
         )
+        segment_owner = segment_categorical_mode(labels, ownership)
 
         boundary = identify_boundary_cells(labels, valid_mask)
         boundary_rows, boundary_cols = np.where(boundary)
@@ -470,6 +528,7 @@ def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type):
             boundary_rows,
             boundary_cols,
         ]
+        cell_owner = ownership[boundary_rows, boundary_cols]
 
         current_edge_counts = np.sum(
             neighbor_ids == current_ids[:, None],
@@ -492,6 +551,7 @@ def iterative_reassignment(labels, valid_mask, feature_arrays, forest_type):
             candidate_valid = (
                 (candidate_ids > 0)
                 & (candidate_ids != current_ids)
+                & (segment_owner[candidate_ids] == cell_owner)
             )
 
             if not np.any(candidate_valid):
@@ -705,7 +765,7 @@ def split_oversized_segments(labels, maximum_cells):
     return output
 
 
-def merge_small_segments(labels, feature_arrays, forest_type, minimum_cells, maximum_cells=None):
+def merge_small_segments(labels, feature_arrays, forest_type, ownership, minimum_cells, maximum_cells=None):
     """Merge many small segments per pass and remap the raster only once per pass."""
     pass_number = 0
 
@@ -713,6 +773,7 @@ def merge_small_segments(labels, feature_arrays, forest_type, minimum_cells, max
         pass_number += 1
         start = time.perf_counter()
         stats = segment_statistics_arrays(labels, feature_arrays, forest_type)
+        segment_owner = segment_categorical_mode(labels, ownership)
         counts = stats["counts"].copy()
         active_ids = np.flatnonzero(counts > 0)
         active_ids = active_ids[active_ids > 0]
@@ -750,6 +811,8 @@ def merge_small_segments(labels, feature_arrays, forest_type, minimum_cells, max
             for neighbor_id, shared_edges in adjacency.get(int(small_id), []):
                 target_root = find(neighbor_id)
                 if target_root == source_root or current_size[target_root] == 0:
+                    continue
+                if segment_owner[source_root] != segment_owner[target_root]:
                     continue
                 combined_size = current_size[source_root] + current_size[target_root]
                 if maximum_cells is not None and combined_size > maximum_cells:
@@ -838,6 +901,7 @@ def merge_similar_adjacent_stands(
     labels,
     raw_age,
     forest_type,
+    ownership,
     maximum_cells,
     maximum_age_difference,
     require_same_forest_type=True,
@@ -865,6 +929,7 @@ def merge_similar_adjacent_stands(
         counts = stats["counts"]
         age_means = stats["means"]["STDAGE"]
         dominant_type = stats["dominant_type"]
+        segment_owner = segment_categorical_mode(labels, ownership)
 
         pairs, shared_edges = segment_adjacency_arrays(labels)
         if pairs.size == 0:
@@ -879,6 +944,7 @@ def merge_similar_adjacent_stands(
             (combined <= maximum_cells)
             & (age_difference <= maximum_age_difference)
             & (shared_edges >= minimum_shared_edges)
+            & (segment_owner[first] == segment_owner[second])
         )
 
         if require_same_forest_type:
@@ -1006,7 +1072,7 @@ def delete_small_segments(labels, minimum_cells):
 # FAST SUMMARY
 # ============================================================
 
-def create_summary(labels, raw_arrays, forest_type, cell_acres, homogeneity_scales):
+def create_summary(labels, raw_arrays, forest_type, ownership, cell_acres, homogeneity_scales):
     valid = labels > 0
     ids = labels[valid].astype(np.int64, copy=False)
     max_id = int(ids.max()) if ids.size else 0
@@ -1057,6 +1123,11 @@ def create_summary(labels, raw_arrays, forest_type, cell_acres, homogeneity_scal
     forest_fraction = dominant_count[segment_ids] / counts[segment_ids]
 
     data["FORTYPCD_DOM"] = dominant_type[segment_ids].astype(np.int32)
+    owner_mode = segment_categorical_mode(labels, ownership)
+    data["OWN_CODE"] = owner_mode[segment_ids].astype(np.int16)
+    code_to_type = {code: name for code, name in OWNERSHIP_SUFFIX_GROUPS.values()}
+    code_to_type[UNKNOWN_OWNERSHIP_CODE] = UNKNOWN_OWNERSHIP_TYPE
+    data["OWN_TYPE"] = [code_to_type.get(int(code), UNKNOWN_OWNERSHIP_TYPE) for code in data["OWN_CODE"]]
     data["FORTYPE_PCT"] = 100.0 * forest_fraction
     data["FORTYPCD_HOM"] = 100.0 * forest_fraction
 
@@ -1434,19 +1505,95 @@ def _calculate_split_fields(feature_class):
     """Assign stable parent labels and recalculate acreage from geometry."""
     seg_id_field = _field_name(feature_class, "SEG_ID")
     _add_field_if_missing(feature_class, "FINAL_ID", "LONG")
+    _add_field_if_missing(feature_class, "MU_ID", "LONG")
     _add_field_if_missing(feature_class, "ParentID", "TEXT", field_length=40)
     _add_field_if_missing(feature_class, "Acres", "DOUBLE")
 
     with arcpy.da.UpdateCursor(
         feature_class,
-        ["OID@", seg_id_field, "FINAL_ID", "ParentID", "Acres", "SHAPE@"],
+        ["OID@", seg_id_field, "FINAL_ID", "MU_ID", "ParentID", "Acres", "SHAPE@"],
     ) as cursor:
         for row in cursor:
             row[2] = int(row[0])
-            row[3] = f"SEG_{int(row[1])}"
-            row[4] = float(row[5].getArea("GEODESIC", "ACRES"))
+            row[3] = int(row[0])
+            row[4] = f"SEG_{int(row[1])}"
+            row[5] = float(row[6].getArea("GEODESIC", "ACRES"))
             cursor.updateRow(row)
 
+
+
+def _classify_owner_value(raw_owner):
+    """Map Forest-* and Other-* labels to the same ownership class."""
+    text = "" if raw_owner is None else str(raw_owner).strip()
+    suffix = text.casefold().split("-", 1)[-1] if "-" in text else text.casefold()
+    return OWNERSHIP_SUFFIX_GROUPS.get(
+        suffix, (UNKNOWN_OWNERSHIP_CODE, UNKNOWN_OWNERSHIP_TYPE)
+    )
+
+
+def prepare_ownership_boundaries():
+    """Dissolve parcel ownership classes and rasterize them to the model grid."""
+    if not USE_OWNERSHIP_HARD_BOUNDARIES:
+        message("Ownership hard boundaries are disabled; using Unknown ownership.")
+        return np.zeros((int(arcpy.Raster(age_raster).height), int(arcpy.Raster(age_raster).width)), dtype=np.int16)
+    if not arcpy.Exists(PARCEL_OWNERSHIP_LAYER):
+        raise FileNotFoundError(
+            "Parcel ownership layer was not found. Update PARCEL_OWNERSHIP_LAYER:\n"
+            + PARCEL_OWNERSHIP_LAYER
+        )
+
+    owner_field = _field_name(PARCEL_OWNERSHIP_LAYER, PARCEL_OWNER_FIELD)
+    scratch_copy = os.path.join(output_gdb, "_ownership_classified")
+    _delete_if_exists(scratch_copy, ownership_dissolved, ownership_raster)
+    message("Classifying parcel ownership values...")
+    arcpy.management.CopyFeatures(PARCEL_OWNERSHIP_LAYER, scratch_copy)
+    _add_field_if_missing(scratch_copy, "OWN_CODE", "SHORT")
+    _add_field_if_missing(scratch_copy, "OWN_TYPE", "TEXT", field_length=30)
+    with arcpy.da.UpdateCursor(scratch_copy, [owner_field, "OWN_CODE", "OWN_TYPE"]) as cursor:
+        for raw_owner, _, _ in cursor:
+            code, owner_type = _classify_owner_value(raw_owner)
+            cursor.updateRow((raw_owner, code, owner_type))
+
+    message("Dissolving parcels by standardized ownership class...")
+    arcpy.analysis.PairwiseDissolve(
+        scratch_copy,
+        ownership_dissolved,
+        ["OWN_CODE", "OWN_TYPE"],
+        multi_part="MULTI_PART",
+    )
+    message("Rasterizing ownership classes as hard stand boundaries...")
+    arcpy.conversion.PolygonToRaster(
+        ownership_dissolved,
+        "OWN_CODE",
+        ownership_raster,
+        cell_assignment="MAXIMUM_AREA",
+        priority_field="OWN_CODE",
+        cellsize=float(arcpy.Raster(age_raster).meanCellWidth),
+    )
+    arcpy.management.DefineProjection(
+        ownership_raster, arcpy.Describe(age_raster).spatialReference
+    )
+    ownership = arcpy.RasterToNumPyArray(
+        ownership_raster, nodata_to_value=UNKNOWN_OWNERSHIP_CODE
+    ).astype(np.int16)
+    _delete_if_exists(scratch_copy)
+    message(f"Dissolved ownership boundaries written:\n{ownership_dissolved}")
+    message(f"Aligned ownership raster written:\n{ownership_raster}")
+    return ownership
+
+
+def finalize_database_groups(feature_class):
+    """Route riparian units separately while retaining ownership attributes."""
+    _add_field_if_missing(feature_class, "DB_GROUP", "TEXT", field_length=30)
+    owner_type_field = _field_name(feature_class, "OWN_TYPE")
+    with arcpy.da.UpdateCursor(
+        feature_class, ["MGMT_CLASS", owner_type_field, "DB_GROUP"]
+    ) as cursor:
+        for mgmt_class, owner_type, _ in cursor:
+            group = owner_type or UNKNOWN_OWNERSHIP_TYPE
+            if int(mgmt_class or 0) == RIPARIAN_MANAGEMENT_CODE:
+                group = "Riparian"
+            cursor.updateRow((mgmt_class, owner_type, group))
 
 def create_riparian_stands():
     """
@@ -1603,6 +1750,7 @@ def create_riparian_stands():
     )
     _calculate_split_fields(riparian_split_stands)
     _assign_management_classes(riparian_split_stands)
+    finalize_database_groups(riparian_split_stands)
 
     riparian_count = 0
     nonriparian_count = 0
@@ -1686,6 +1834,11 @@ def main():
     basal_area = read_raster(basal_area_raster, scale=10.0)
     qmd = read_raster(qmd_raster, scale=10.0)
     tpa = read_raster(tpa_raster, scale=10.0)
+    ownership = prepare_ownership_boundaries()
+    if ownership.shape != age.shape:
+        raise RuntimeError(
+            f"Ownership raster shape {ownership.shape} does not match segmentation rasters {age.shape}."
+        )
 
     valid_mask = (
         np.isfinite(age)
@@ -1720,7 +1873,7 @@ def main():
     message("CREATING INITIAL SEEDS")
     message("=" * 60)
     start = time.perf_counter()
-    labels = create_initial_segments(valid_mask, initial_seed_cells)
+    labels = create_initial_segments(valid_mask, initial_seed_cells, ownership)
     initial_count = int(np.count_nonzero(np.bincount(labels.ravel())[1:]))
     message(f"Initial connected seed regions: {initial_count:,}")
     timed_message("Initial seed creation", start)
@@ -1728,7 +1881,7 @@ def main():
     message("=" * 60)
     message("ITERATIVE CELL REASSIGNMENT")
     message("=" * 60)
-    labels = iterative_reassignment(labels, valid_mask, feature_arrays, forest_type)
+    labels = iterative_reassignment(labels, valid_mask, feature_arrays, forest_type, ownership)
 
     message("=" * 60)
     message("SEPARATING DISCONNECTED PIECES")
@@ -1754,6 +1907,7 @@ def main():
         labels,
         feature_arrays,
         forest_type,
+        ownership,
         minimum_stand_cells,
         maximum_cells=maximum_stand_cells,
     )
@@ -1789,6 +1943,7 @@ def main():
             labels,
             age,
             forest_type,
+            ownership,
             maximum_stand_cells,
             SIMILAR_MERGE_MAX_AGE_DIFFERENCE,
             require_same_forest_type=(
@@ -1842,7 +1997,7 @@ def main():
         message(f"  {variable}: {landscape_sd:.3f}")
 
     start = time.perf_counter()
-    summary = create_summary(labels, raw_arrays, forest_type, cell_acres, homogeneity_scales)
+    summary = create_summary(labels, raw_arrays, forest_type, ownership, cell_acres, homogeneity_scales)
     timed_message("Segment summary", start)
     summary.to_csv(segment_summary_csv, index=False)
     message(f"Segment summary written:\n{segment_summary_csv}")

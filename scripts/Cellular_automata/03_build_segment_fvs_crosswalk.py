@@ -40,7 +40,7 @@ import pandas as pd
 stand_polygons = (
     r"D:\forest_condition_2026\Cellular_automata"
     r"\TreeMap_Segmentation_Output\TreeMap_Segmentation.gdb"
-    r"\TreeMap_Segments_Initial"
+    r"\ManagementUnits_Final"
 )
 
 segment_raster = (
@@ -396,153 +396,80 @@ def build_weights_table(
 
 
 def read_stand_polygons(polygon_path):
-    """
-    Read all available polygon attributes and add stable FVS identifiers.
-    """
-    field_lookup = get_field_lookup(polygon_path)
-
-    seg_id_field = find_field(
-        polygon_path,
-        ["SEG_ID", "GRIDCODE", "VALUE"],
-        required=True,
-    )
-
-    # Exclude ArcGIS-managed geometry and object-ID fields.
-    excluded_types = {
-        "OID",
-        "Geometry",
-        "Blob",
-        "Raster",
-        "GUID",
-        "GlobalID",
-    }
-
-    attribute_fields = []
-
-    for field in arcpy.ListFields(polygon_path):
-        if field.type in excluded_types:
-            continue
-
-        if field.name.upper() in {
-            "SHAPE_LENGTH",
-            "SHAPE_AREA",
-        }:
-            continue
-
-        attribute_fields.append(field.name)
-
-    if seg_id_field not in attribute_fields:
-        attribute_fields.insert(0, seg_id_field)
-
+    """Read final split pieces; SEG_ID in the CSV becomes the unique MU_ID."""
+    parent_field = find_field(polygon_path, ["SEG_ID", "GRIDCODE", "VALUE"], True)
+    mu_field = find_field(polygon_path, ["MU_ID", "FINAL_ID"], True)
+    excluded_types = {"OID", "Geometry", "Blob", "Raster", "GUID", "GlobalID"}
+    attribute_fields = [
+        f.name for f in arcpy.ListFields(polygon_path)
+        if f.type not in excluded_types
+        and f.name.upper() not in {"SHAPE_LENGTH", "SHAPE_AREA"}
+    ]
     rows = []
-
-    with arcpy.da.SearchCursor(
-        polygon_path,
-        attribute_fields,
-    ) as cursor:
+    with arcpy.da.SearchCursor(polygon_path, attribute_fields) as cursor:
         for row in cursor:
             rows.append(dict(zip(attribute_fields, row)))
-
     stands = pd.DataFrame(rows)
-
     if stands.empty:
-        raise RuntimeError(
-            "No stand polygon records were read."
-        )
+        raise RuntimeError("No final stand polygon records were read.")
 
-    if seg_id_field != "SEG_ID":
-        stands = stands.rename(
-            columns={seg_id_field: "SEG_ID"}
-        )
-
-    stands["SEG_ID"] = pd.to_numeric(
-        stands["SEG_ID"],
-        errors="raise",
-    ).astype("int64")
-
+    stands["ParentSEG_ID"] = pd.to_numeric(stands[parent_field], errors="raise").astype("int64")
+    stands["SEG_ID"] = pd.to_numeric(stands[mu_field], errors="raise").astype("int64")
+    stands["MU_ID"] = stands["SEG_ID"].astype(str)
     if stands["SEG_ID"].duplicated().any():
-        duplicate_ids = (
-            stands.loc[
-                stands["SEG_ID"].duplicated(keep=False),
-                "SEG_ID",
-            ]
-            .drop_duplicates()
-            .head(20)
-            .tolist()
-        )
-
-        raise RuntimeError(
-            "The polygon feature class has duplicate SEG_ID values. "
-            f"Examples: {duplicate_ids}"
-        )
-
-    stands["STAND_ID"] = (
-        "MU_" + stands["SEG_ID"].astype(str)
-    )
-
+        raise RuntimeError("Final MU_ID values are not unique in the polygon feature class.")
+    stands["STAND_ID"] = "MU_" + stands["SEG_ID"].astype(str)
     stands["FVS_Stand_ID"] = stands["STAND_ID"]
     stands["Inventory_Year"] = inventory_year
     stands["Variant"] = variant
     stands["State"] = state
-
-    # Standardize the age field expected by the downstream LETO/FVS scripts.
     if "STDAGE_MEAN" in stands.columns:
-        stands["AGE"] = (
-            pd.to_numeric(
-                stands["STDAGE_MEAN"],
-                errors="coerce",
-            )
-            .round()
-            .astype("Int64")
-        )
-
-    # Move identifiers and FVS metadata to the front while preserving all
-    # available segmentation summary fields.
-    front = [
-        "FVS_Stand_ID",
-        "STAND_ID",
-        "SEG_ID",
-        "Inventory_Year",
-        "Variant",
-        "State",
-    ]
-
+        stands["AGE"] = pd.to_numeric(stands["STDAGE_MEAN"], errors="coerce").round().astype("Int64")
+    front = ["FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "ParentSEG_ID",
+             "Inventory_Year", "Variant", "State"]
     if "AGE" in stands.columns:
         front.append("AGE")
-
-    remaining = [
-        column
-        for column in stands.columns
-        if column not in front
-    ]
-
+    remaining = [c for c in stands.columns if c not in front and c not in {parent_field, mu_field}]
     stands = stands[front + remaining].sort_values("SEG_ID")
-
-    message(
-        f"Final stand polygon records: {len(stands):,}"
-    )
-
+    message(f"Final management-unit polygon records: {len(stands):,}")
     return stands
 
 
-def validate_segment_ids(weights, stands):
-    raster_ids = set(weights["SEG_ID"].unique().tolist())
-    polygon_ids = set(stands["SEG_ID"].unique().tolist())
-
-    only_raster = sorted(raster_ids - polygon_ids)
-    only_polygon = sorted(polygon_ids - raster_ids)
-
-    if only_raster or only_polygon:
-        raise RuntimeError(
-            "Final raster and polygon SEG_ID sets do not match.\n"
-            f"Only in raster ({len(only_raster)}): {only_raster[:20]}\n"
-            f"Only in polygons ({len(only_polygon)}): {only_polygon[:20]}"
-        )
-
-    message(
-        f"Raster/polygon SEG_ID match passed: "
-        f"{len(raster_ids):,} stands"
+def expand_parent_weights_to_management_units(parent_weights, stands):
+    """Give every final piece the weighted FIA donor mix of its parent segment."""
+    donor = parent_weights.rename(columns={"SEG_ID": "ParentSEG_ID"}).copy()
+    donor = donor.drop(columns=["FVS_Stand_ID", "STAND_ID"], errors="ignore")
+    mapping_columns = ["SEG_ID", "MU_ID", "ParentSEG_ID", "STAND_ID", "FVS_Stand_ID", "Acres"]
+    mapping_columns = [c for c in mapping_columns if c in stands.columns]
+    expanded = stands[mapping_columns].merge(
+        donor, on="ParentSEG_ID", how="left", validate="many_to_many"
     )
+    if expanded["PLT_CN"].isna().any():
+        missing = expanded.loc[expanded["PLT_CN"].isna(), "ParentSEG_ID"].drop_duplicates().head(20).tolist()
+        raise RuntimeError(f"Final pieces had no parent donor weights. Parent SEG_ID examples: {missing}")
+    if "Acres" in expanded.columns:
+        expanded["DONOR_ACRES"] = pd.to_numeric(expanded["Acres"], errors="coerce") * expanded["WEIGHT"]
+    ordered = ["FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "ParentSEG_ID",
+               "PLT_CN", "TREEMAP_VALUE", "PIXEL_COUNT", "STAND_PIXEL_COUNT",
+               "DONOR_ACRES", "WEIGHT"]
+    expanded = expanded[[c for c in ordered if c in expanded.columns]].sort_values(
+        ["SEG_ID", "WEIGHT"], ascending=[True, False]
+    )
+    check = expanded.groupby("SEG_ID")["WEIGHT"].sum()
+    if float((check - 1.0).abs().max()) > 1e-9:
+        raise RuntimeError("Expanded management-unit donor weights do not sum to 1.")
+    return expanded
+
+def validate_segment_ids(parent_weights, stands):
+    raster_ids = set(parent_weights["SEG_ID"].unique().tolist())
+    parent_ids = set(stands["ParentSEG_ID"].unique().tolist())
+    missing = sorted(parent_ids - raster_ids)
+    if missing:
+        raise RuntimeError(
+            "Some final management units reference parent segments absent from the raster weights. "
+            f"Examples: {missing[:20]}"
+        )
+    message(f"Parent-segment donor coverage passed for {len(parent_ids):,} parent stands.")
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +517,7 @@ def main():
     message("BUILDING SEGMENT-TO-PLT_CN WEIGHTS")
     message("=" * 70)
 
-    weights = build_weights_table(
+    parent_weights = build_weights_table(
         segment_raster,
         treemap_raster,
         value_to_plt_cn,
@@ -606,51 +533,14 @@ def main():
     )
 
     validate_segment_ids(
-        weights,
+        parent_weights,
         stands,
     )
 
-    # Compare polygon acreage to cell-derived acreage when an Acres field
-    # exists. This is diagnostic only because polygon boundaries and raster
-    # cell footprints can differ slightly.
-    if "Acres" in stands.columns:
-        raster_acres = (
-            weights.groupby("SEG_ID")["DONOR_ACRES"]
-            .sum()
-            .rename("RASTER_ACRES")
-            .reset_index()
-        )
-
-        acreage_check = stands[
-            ["SEG_ID", "Acres"]
-        ].merge(
-            raster_acres,
-            on="SEG_ID",
-            how="left",
-            validate="one_to_one",
-        )
-
-        acreage_check["Acres"] = pd.to_numeric(
-            acreage_check["Acres"],
-            errors="coerce",
-        )
-
-        acreage_check["ACRE_DIFF"] = (
-            acreage_check["Acres"]
-            - acreage_check["RASTER_ACRES"]
-        )
-
-        message(
-            "Polygon versus raster acreage diagnostics:"
-        )
-        message(
-            f"  Mean absolute difference: "
-            f"{acreage_check['ACRE_DIFF'].abs().mean():.4f} acres"
-        )
-        message(
-            f"  Maximum absolute difference: "
-            f"{acreage_check['ACRE_DIFF'].abs().max():.4f} acres"
-        )
+    weights = expand_parent_weights_to_management_units(
+        parent_weights,
+        stands,
+    )
 
     message("=" * 70)
     message("WRITING OUTPUTS")

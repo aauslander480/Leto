@@ -48,7 +48,7 @@ segment_folder = (
 stand_polygons = (
     r"D:\forest_condition_2026\Cellular_automata"
     r"\TreeMap_Segmentation_Output\TreeMap_Segmentation.gdb"
-    r"\TreeMap_Segments_Initial"
+    r"\ManagementUnits_Final"
 )
 
 segment_gdb = (
@@ -1003,7 +1003,7 @@ def impute_missing_tree_lists(
         "missing_segment_lyr",
         "NEW_SELECTION",
         sql_in(
-            "SEG_ID",
+            "MU_ID",
             missing["SEG_ID"].tolist(),
             numeric=True,
         ),
@@ -1013,7 +1013,7 @@ def impute_missing_tree_lists(
         "runnable_segment_lyr",
         "NEW_SELECTION",
         sql_in(
-            "SEG_ID",
+            "MU_ID",
             runnable["SEG_ID"].tolist(),
             numeric=True,
         ),
@@ -1057,7 +1057,7 @@ def impute_missing_tree_lists(
 
     with arcpy.da.SearchCursor(
         stand_polygons,
-        ["OID@", "SEG_ID"],
+        ["OID@", "MU_ID"],
     ) as cursor:
         for oid, seg_id in cursor:
             oid_to_segment[int(oid)] = int(seg_id)
@@ -1223,7 +1223,16 @@ def build_final_stands(
         "Stand_ID",
         "MU_ID",
         "SEG_ID",
+        "ParentSEG_ID",
         "Acres",
+        "OWN_CODE",
+        "OWN_TYPE",
+        "OWN_RAW",
+        "OWN_PCT",
+        "OWN_MIXED",
+        "MGMT_CLASS",
+        "MGMT_TYPE",
+        "DB_GROUP",
         "PLT_CN",
         "AGE",
     ]
