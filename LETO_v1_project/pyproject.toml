@@ -1,0 +1,8 @@
+[project]
+name = "leto-forest-model"
+version = "1.0.0"
+description = "Landscape segmentation and FVS inventory preparation"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
