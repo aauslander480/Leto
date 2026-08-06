@@ -312,9 +312,13 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         s3.inventory_year = config.inventory_year
         s3.variant = config.fvs_variant
         s3.state = config.fvs_state
-        stands_df = s3.read_stand_polygons(management_units)
-        s3.validate_segment_ids(parent_weights, stands_df)
-        weights_df = s3.expand_parent_weights_to_management_units(parent_weights, stands_df)
+        stands_df, components_df = s3.read_stand_polygons(
+            management_units, return_components=True
+        )
+        s3.validate_segment_ids(parent_weights, stands_df, components_df)
+        weights_df = s3.expand_parent_weights_to_management_units(
+            parent_weights, stands_df, components_df
+        )
         weights_df.to_csv(Path(paths["crosswalk"]) / "Segment_PLT_CN_Weights.csv", index=False)
 
     with timed_stage("Stage 4 - Build weighted FVS inventory", timings):
