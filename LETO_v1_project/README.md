@@ -57,3 +57,20 @@ renumbering their original `SEG_ID` values. Its default candidate rules require
 matching ownership and dominant forest type, enforce the configured maximum
 combined acreage, and use a 60-meter search distance. Donor weights for grouped
 segments are combined by contributing acreage.
+
+
+## Proximity-chain QA and final management-unit identity
+
+Proximity grouping has two identities: `BIO_MU_ID` is the biological grouping
+created by the unchanged proximity candidate algorithm, while final `MU_ID`
+is the routing-safe stand identity after riparian, wetland, ownership, management
+class, management type, and database-group compatibility is enforced.
+`SEG_ID` is immutable provenance and `MU_PART` is deterministic by original
+`SEG_ID` and source object ID.
+
+Chain QA is calculated groupwise for each final MU. `MAX_PAIR_DIST_M` and
+`MU_SPAN_M` are the maximum shortest boundary-to-boundary separation among
+unique component pairs; `MAX_CENTROID_DIST_M` is reported separately.
+`CHAIN_FLAG` is true when span exceeds the configured proximity search
+distance, and `CHAIN_RATIO` is span divided by that distance. The groupwise
+implementation intentionally avoids a global all-pairs distance table.
