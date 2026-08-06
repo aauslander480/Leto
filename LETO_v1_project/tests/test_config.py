@@ -17,4 +17,6 @@ def test_example_config_loads():
     )
     assert config.riparian["management_codes"]["riparian"] == 1
     assert config.database["basal_area_factor"] == -1
-    assert "proximity" not in config.segmentation
+    assert config.small_stands["remaining_small_stand_action"] == "force_merge"
+    assert config.small_stands["maximum_distance_meters"] == 60.0
+    assert config.small_stands["maximum_combined_acres"] == 300.0
