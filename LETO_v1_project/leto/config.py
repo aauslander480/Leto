@@ -35,6 +35,7 @@ class RunConfig:
     raster_model: dict[str, Any] = field(default_factory=dict)
     ownership: dict[str, Any] = field(default_factory=dict)
     segmentation: dict[str, Any] = field(default_factory=dict)
+    small_stands: dict[str, Any] = field(default_factory=dict)
     riparian: dict[str, Any] = field(default_factory=dict)
     inventory: dict[str, Any] = field(default_factory=dict)
     database: dict[str, Any] = field(default_factory=dict)
@@ -91,6 +92,14 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("raster_model", {})
     raw.setdefault("ownership", {})
     raw.setdefault("segmentation", {})
+    raw.setdefault(
+        "small_stands",
+        {
+            "remaining_small_stand_action": raw["segmentation"].get(
+                "remaining_small_stand_action", "retain"
+            ),
+        },
+    )
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
