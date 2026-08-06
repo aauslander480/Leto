@@ -120,6 +120,13 @@ CONFIG = {
         "retain_when_no_candidate": True,
     },
 
+    "proximity_chain_qa": {
+        "enabled": True,
+        "warning_chain_ratio": 2.0,
+        "write_component_pair_csv": False,
+        "acreage_tolerance_acres": 1e-6,
+    },
+
     "riparian": {
         "create_riparian_stands": True,
         "classify_wetlands": False,
