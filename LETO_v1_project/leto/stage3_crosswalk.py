@@ -32,6 +32,8 @@ import arcpy
 import numpy as np
 import pandas as pd
 
+from .small_stands import aggregate_management_unit_weights
+
 
 # ---------------------------------------------------------------------------
 # USER INPUTS
@@ -472,81 +474,147 @@ def build_weights_table(
     return counts
 
 
-def read_stand_polygons(polygon_path):
-    """Read final split pieces; SEG_ID in the CSV becomes the unique MU_ID."""
+def read_stand_polygons(polygon_path, return_components=False):
+    """Read polygon components and aggregate one FVS stand per final MU_ID."""
     parent_field = find_field(polygon_path, ["SEG_ID", "GRIDCODE", "VALUE"], True)
     mu_field = find_field(polygon_path, ["MU_ID", "FINAL_ID"], True)
     excluded_types = {"OID", "Geometry", "Blob", "Raster", "GUID", "GlobalID"}
     attribute_fields = [
-        f.name for f in arcpy.ListFields(polygon_path)
-        if f.type not in excluded_types
-        and f.name.upper() not in {"SHAPE_LENGTH", "SHAPE_AREA"}
+        field.name
+        for field in arcpy.ListFields(polygon_path)
+        if field.type not in excluded_types
+        and field.name.upper() not in {"SHAPE_LENGTH", "SHAPE_AREA"}
     ]
     rows = []
     with arcpy.da.SearchCursor(polygon_path, attribute_fields) as cursor:
         for row in cursor:
             rows.append(dict(zip(attribute_fields, row)))
-    stands = pd.DataFrame(rows)
-    if stands.empty:
+    components = pd.DataFrame(rows)
+    if components.empty:
         raise RuntimeError("No final stand polygon records were read.")
 
-    stands["ParentSEG_ID"] = pd.to_numeric(stands[parent_field], errors="raise").astype("int64")
-    stands["SEG_ID"] = pd.to_numeric(stands[mu_field], errors="raise").astype("int64")
-    stands["MU_ID"] = stands["SEG_ID"].astype(str)
-    if stands["SEG_ID"].duplicated().any():
-        raise RuntimeError("Final MU_ID values are not unique in the polygon feature class.")
-    stands["STAND_ID"] = "MU_" + stands["SEG_ID"].astype(str)
+    components["SEG_ID"] = pd.to_numeric(
+        components[parent_field], errors="raise"
+    ).astype("int64")
+    components["MU_ID"] = pd.to_numeric(
+        components[mu_field], errors="raise"
+    ).astype("int64")
+    components["Acres"] = pd.to_numeric(components["Acres"], errors="raise")
+    components["ParentSEG_ID"] = components["SEG_ID"]
+    if (components["Acres"] <= 0).any():
+        raise RuntimeError("Final management-unit components must have positive acreage.")
+
+    stand_rows = []
+    for mu_id, group in components.groupby("MU_ID", sort=True):
+        row = group.iloc[0].to_dict()
+        acres = group["Acres"].sum()
+        row["MU_ID"] = int(mu_id)
+        row["SEG_ID"] = int(mu_id)
+        row["ParentSEG_ID"] = int(group["SEG_ID"].min())
+        row["SEG_IDS"] = ",".join(
+            str(value) for value in sorted(group["SEG_ID"].astype(int).unique())
+        )
+        row["SEGMENT_COUNT"] = int(group["SEG_ID"].nunique())
+        row["Acres"] = float(acres)
+        if "STDAGE_MEAN" in group.columns:
+            ages = pd.to_numeric(group["STDAGE_MEAN"], errors="coerce")
+            valid_age = ages.notna()
+            if valid_age.any():
+                row["STDAGE_MEAN"] = float(
+                    (ages[valid_age] * group.loc[valid_age, "Acres"]).sum()
+                    / group.loc[valid_age, "Acres"].sum()
+                )
+        if "MGMT_TYPE" in group.columns:
+            management_types = set(group["MGMT_TYPE"].dropna().astype(str))
+            if "Riparian" in management_types:
+                row["MGMT_TYPE"] = "Riparian"
+                row["DB_GROUP"] = "Riparian"
+            elif "Wetland" in management_types:
+                row["MGMT_TYPE"] = "Wetland"
+        stand_rows.append(row)
+
+    stands = pd.DataFrame(stand_rows)
+    stands["MU_ID"] = stands["MU_ID"].astype("int64")
+    stands["SEG_ID"] = stands["MU_ID"]
+    stands["STAND_ID"] = "MU_" + stands["MU_ID"].astype(str)
     stands["FVS_Stand_ID"] = stands["STAND_ID"]
     stands["Inventory_Year"] = inventory_year
     stands["Variant"] = variant
     stands["State"] = state
     if "STDAGE_MEAN" in stands.columns:
-        stands["AGE"] = pd.to_numeric(stands["STDAGE_MEAN"], errors="coerce").round().astype("Int64")
-    front = ["FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "ParentSEG_ID",
-             "Inventory_Year", "Variant", "State"]
+        stands["AGE"] = pd.to_numeric(
+            stands["STDAGE_MEAN"], errors="coerce"
+        ).round().astype("Int64")
+    front = [
+        "FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "ParentSEG_ID",
+        "SEG_IDS", "SEGMENT_COUNT", "Inventory_Year", "Variant", "State",
+    ]
     if "AGE" in stands.columns:
         front.append("AGE")
-    remaining = [c for c in stands.columns if c not in front and c not in {parent_field, mu_field}]
-    stands = stands[front + remaining].sort_values("SEG_ID")
-    message(f"Final management-unit polygon records: {len(stands):,}")
+    remaining = [
+        column for column in stands.columns
+        if column not in front and column not in {parent_field, mu_field}
+    ]
+    stands = stands[front + remaining].sort_values("MU_ID").reset_index(drop=True)
+    message(
+        f"Final management-unit polygon records: {len(components):,}; "
+        f"unique MU_ID values: {len(stands):,}"
+    )
+    if return_components:
+        return stands, components
     return stands
 
 
-def expand_parent_weights_to_management_units(parent_weights, stands):
-    """Give every final piece the weighted FIA donor mix of its parent segment."""
-    donor = parent_weights.rename(columns={"SEG_ID": "ParentSEG_ID"}).copy()
-    donor = donor.drop(columns=["FVS_Stand_ID", "STAND_ID"], errors="ignore")
-    mapping_columns = ["SEG_ID", "MU_ID", "ParentSEG_ID", "STAND_ID", "FVS_Stand_ID", "Acres"]
-    mapping_columns = [c for c in mapping_columns if c in stands.columns]
-    expanded = stands[mapping_columns].merge(
-        donor, on="ParentSEG_ID", how="left", validate="many_to_many"
+def expand_parent_weights_to_management_units(
+    parent_weights,
+    stands,
+    components=None,
+):
+    """Acreage-weight parent donors across every SEG_ID contributing to MU_ID."""
+    if components is None:
+        components = stands.rename(columns={"ParentSEG_ID": "SEG_ID"}).copy()
+        if "MU_ID" not in components.columns:
+            components["MU_ID"] = components["SEG_ID"]
+    expanded = aggregate_management_unit_weights(parent_weights, components)
+    stand_mapping = stands[["MU_ID", "STAND_ID", "FVS_Stand_ID"]].copy()
+    stand_mapping["MU_ID"] = pd.to_numeric(
+        stand_mapping["MU_ID"], errors="raise"
+    ).astype("int64")
+    expanded = expanded.drop(
+        columns=["STAND_ID", "FVS_Stand_ID"], errors="ignore"
+    ).merge(
+        stand_mapping, on="MU_ID", how="left", validate="many_to_one"
     )
-    if expanded["PLT_CN"].isna().any():
-        missing = expanded.loc[expanded["PLT_CN"].isna(), "ParentSEG_ID"].drop_duplicates().head(20).tolist()
-        raise RuntimeError(f"Final pieces had no parent donor weights. Parent SEG_ID examples: {missing}")
-    if "Acres" in expanded.columns:
-        expanded["DONOR_ACRES"] = pd.to_numeric(expanded["Acres"], errors="coerce") * expanded["WEIGHT"]
-    ordered = ["FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "ParentSEG_ID",
-               "PLT_CN", "TREEMAP_VALUE", "PIXEL_COUNT", "STAND_PIXEL_COUNT",
-               "DONOR_ACRES", "WEIGHT"]
-    expanded = expanded[[c for c in ordered if c in expanded.columns]].sort_values(
-        ["SEG_ID", "WEIGHT"], ascending=[True, False]
-    )
-    check = expanded.groupby("SEG_ID")["WEIGHT"].sum()
-    if float((check - 1.0).abs().max()) > 1e-9:
-        raise RuntimeError("Expanded management-unit donor weights do not sum to 1.")
-    return expanded
+    if expanded["STAND_ID"].isna().any():
+        raise RuntimeError("Donor weights reference an unknown MU_ID.")
+    ordered = [
+        "FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID", "PLT_CN",
+        "SOURCE_SEG_IDS", "DONOR_ACRES", "MU_ACRES", "WEIGHT",
+        "WEIGHT_SUM_ERROR",
+    ]
+    return expanded[
+        [column for column in ordered if column in expanded.columns]
+    ].sort_values(
+        ["MU_ID", "WEIGHT"], ascending=[True, False]
+    ).reset_index(drop=True)
 
-def validate_segment_ids(parent_weights, stands):
+
+def validate_segment_ids(parent_weights, stands, components=None):
     raster_ids = set(parent_weights["SEG_ID"].unique().tolist())
-    parent_ids = set(stands["ParentSEG_ID"].unique().tolist())
+    if components is None:
+        parent_ids = set(stands["ParentSEG_ID"].unique().tolist())
+    else:
+        parent_ids = set(components["SEG_ID"].unique().tolist())
     missing = sorted(parent_ids - raster_ids)
     if missing:
         raise RuntimeError(
-            "Some final management units reference parent segments absent from the raster weights. "
-            f"Examples: {missing[:20]}"
+            "Some final management units reference parent segments absent "
+            f"from the raster weights. Examples: {missing[:20]}"
         )
-    message(f"Parent-segment donor coverage passed for {len(parent_ids):,} parent stands.")
+    message(
+        f"Parent-segment donor coverage passed for {len(parent_ids):,} "
+        "parent stands."
+    )
 
 
 # ---------------------------------------------------------------------------
