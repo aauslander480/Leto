@@ -124,7 +124,7 @@ CONFIG = {
         "enabled": True,
         "warning_chain_ratio": 2.0,
         "write_component_pair_csv": False,
-        "acreage_tolerance_acres": 1e-6,
+        "acreage_tolerance_acres": 0.01,
     },
 
     "riparian": {
