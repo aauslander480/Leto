@@ -565,6 +565,52 @@ def read_stand_polygons(polygon_path, return_components=False):
     return stands
 
 
+def read_management_segments(component_path):
+    """Read the singlepart provenance layer used for donor aggregation."""
+    _, components = read_stand_polygons(component_path, return_components=True)
+    required = {"SEG_ID", "MU_ID", "ParentSEG_ID", "Acres"}
+    missing = required - set(components.columns)
+    if missing:
+        raise RuntimeError(
+            f"ManagementSegments_Final is missing fields: {sorted(missing)}"
+        )
+    if "MU_PART" in components.columns:
+        duplicate_parts = components.duplicated(["MU_ID", "MU_PART"])
+        if duplicate_parts.any():
+            raise RuntimeError("MU_PART must be unique within every final MU_ID.")
+    message(
+        f"ManagementSegments_Final records: {len(components):,}; "
+        f"source SEG_ID values: {components['SEG_ID'].nunique():,}"
+    )
+    return components
+
+
+def read_management_units(unit_path):
+    """Read exactly one dissolved spatial record per FVS stand."""
+    stands, records = read_stand_polygons(unit_path, return_components=True)
+    if records["MU_ID"].duplicated().any():
+        duplicates = (
+            records.loc[records["MU_ID"].duplicated(False), "MU_ID"]
+            .drop_duplicates().head(20).tolist()
+        )
+        raise RuntimeError(
+            "ManagementUnits_Final must contain exactly one feature per MU_ID; "
+            f"duplicates: {duplicates}"
+        )
+    if len(stands) != len(records):
+        raise RuntimeError(
+            "ManagementUnits_Final record count differs from unique FVS stands."
+        )
+    for field in ("MGMT_CLASS", "MGMT_TYPE", "DB_GROUP", "OWN_CODE",
+                  "OWN_TYPE", "RIPARIAN", "WETLAND"):
+        if field in records.columns and records[field].isna().any():
+            raise RuntimeError(
+                f"ManagementUnits_Final contains null routing field {field}."
+            )
+    message(f"ManagementUnits_Final unique stands: {len(stands):,}")
+    return stands
+
+
 def expand_parent_weights_to_management_units(
     parent_weights,
     stands,
