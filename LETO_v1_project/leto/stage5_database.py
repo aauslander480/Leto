@@ -33,11 +33,12 @@ default_inv_year = 2022
 stand_group_name = "All_Stands"
 
 # FVS sampling design. TREE_COUNT is already expressed as trees per acre.
-basal_area_factor = -1
-inv_plot_size = 1
-brk_dbh = 0
-num_plots = 1
-nonstk_plots = 0
+# Populated from the selected regional configuration by pipeline.py.
+basal_area_factor = None
+inv_plot_size = None
+brk_dbh = None
+num_plots = None
+nonstk_plots = None
 
 # Files copied into Inputs when present.
 run_input_names = [
