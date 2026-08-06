@@ -284,6 +284,9 @@ def aggregate_management_unit_weights(
     )
     grouped = grouped.merge(totals, on="MU_ID", how="left", validate="many_to_one")
     grouped["WEIGHT"] = grouped["DONOR_ACRES"] / grouped["MU_ACRES"]
+    grouped["WEIGHT"] = grouped["WEIGHT"] / grouped.groupby(
+        "MU_ID"
+    )["WEIGHT"].transform("sum")
     grouped["SEG_ID"] = grouped["MU_ID"]
     grouped["STAND_ID"] = "MU_" + grouped["MU_ID"].astype(str)
     grouped["FVS_Stand_ID"] = grouped["STAND_ID"]
