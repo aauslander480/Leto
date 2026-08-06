@@ -1090,6 +1090,17 @@ def impute_missing_tree_lists(
 
     nearest = pd.DataFrame(near_rows)
 
+    if not nearest.empty:
+        # Multipart MU_ID values can yield one near-table row per component.
+        # Retain only the closest donor for each management unit.
+        nearest = (
+            nearest.sort_values(
+                ["MISSING_SEG_ID", "NEAR_DIST", "DONOR_SEG_ID"]
+            )
+            .drop_duplicates("MISSING_SEG_ID")
+            .reset_index(drop=True)
+        )
+
     if nearest.empty:
         message(
             "No nearest-neighbor pairs were generated."
