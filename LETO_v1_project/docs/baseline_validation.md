@@ -11,4 +11,10 @@ The first reorganized-project run should be compared against the verified unifie
 | Nearest-imputed stands | 418 |
 | Grouped FVS databases | 6 |
 
-Exact equality is expected because the stage algorithms were copied unchanged. Differences in output row ordering are harmless; differences in counts, acreage, weights, or database contents should be investigated before adding proximity merging.
+Exact equality is expected when the configured small-stand action remains
+`force_merge`. Differences in output row ordering are harmless; differences in
+counts, acreage, weights, or database contents must be investigated.
+
+The optional `proximity_merge` action is outside the verified baseline. Its QA
+must show no acreage loss, normalized donor weights, no FVS stands without
+trees, and valid grouped database outputs.
