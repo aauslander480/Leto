@@ -113,4 +113,38 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
 
+    action = str(
+        raw["small_stands"]["remaining_small_stand_action"]
+    ).lower().strip()
+    allowed_actions = {"force_merge", "retain", "delete", "proximity_merge"}
+    if action not in allowed_actions:
+        raise ValueError(
+            "small_stands.remaining_small_stand_action must be one of "
+            f"{sorted(allowed_actions)}."
+        )
+    raw["small_stands"]["remaining_small_stand_action"] = action
+    for key in ("maximum_distance_meters", "maximum_combined_acres"):
+        try:
+            value = float(raw["small_stands"][key])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"small_stands.{key} must be a positive number."
+            ) from exc
+        if value <= 0:
+            raise ValueError(
+                f"small_stands.{key} must be a positive number."
+            )
+        raw["small_stands"][key] = value
+    minimum_acres = float(
+        raw["segmentation"].get("minimum_stand_acres", 0)
+    )
+    if (
+        action == "proximity_merge"
+        and raw["small_stands"]["maximum_combined_acres"] < minimum_acres
+    ):
+        raise ValueError(
+            "small_stands.maximum_combined_acres must be at least "
+            "segmentation.minimum_stand_acres."
+        )
+
     return RunConfig(**raw)
