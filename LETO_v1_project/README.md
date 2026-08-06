@@ -46,6 +46,14 @@ Edit paths and region-specific settings only in `configs/maine_test.py`.
 
 Copy `configs/maine_test.py`, rename it, and change its source paths and FVS metadata. The LETO package should remain unchanged.
 
-## Current small-stand behavior
+## Small-stand behavior
 
-The baseline still uses `remaining_small_stand_action = "force_merge"`. The planned 60-meter proximity merge will be introduced only after this reorganized project reproduces the verified baseline.
+The verified baseline continues to use
+`small_stands["remaining_small_stand_action"] = "force_merge"`.
+
+An optional `"proximity_merge"` mode groups eligible residual small segments
+within the configured distance under one `MU_ID` without changing geometry or
+renumbering their original `SEG_ID` values. Its default candidate rules require
+matching ownership and dominant forest type, enforce the configured maximum
+combined acreage, and use a 60-meter search distance. Donor weights for grouped
+segments are combined by contributing acreage.
