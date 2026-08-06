@@ -88,6 +88,7 @@ def finalize_management_outputs(
         component_output,
         maximum_distance_meters=maximum_distance_meters,
         warning_chain_ratio=warning_chain_ratio,
+        collect_pair_rows=write_component_pair_csv,
     )
     qa_path = Path(qa_folder) / "Proximity_MU_Chain_QA.csv"
     flags_path = Path(qa_folder) / "Proximity_MU_Chain_Flags.csv"
@@ -142,7 +143,10 @@ def _ensure_component_fields(feature_class):
             arcpy.management.AddField(feature_class, name, kind)
 
 
-def _calculate_chain_qa(feature_class, *, maximum_distance_meters, warning_chain_ratio):
+def _calculate_chain_qa(
+    feature_class, *, maximum_distance_meters, warning_chain_ratio,
+    collect_pair_rows=False,
+):
     description = arcpy.Describe(feature_class)
     spatial_reference = description.spatialReference
     if spatial_reference is None or spatial_reference.type != "Projected":
@@ -175,13 +179,14 @@ def _calculate_chain_qa(feature_class, *, maximum_distance_meters, warning_chain
                 "boundary_distance_m": boundary,
                 "centroid_distance_m": centroid,
             })
-            pair_rows.append({
-                "MU_ID": mu_id,
-                "LEFT_OID": left["OID"], "RIGHT_OID": right["OID"],
-                "LEFT_SEG_ID": left["SEG_ID"], "RIGHT_SEG_ID": right["SEG_ID"],
-                "BOUNDARY_DISTANCE_M": boundary,
-                "CENTROID_DISTANCE_M": centroid,
-            })
+            if collect_pair_rows:
+                pair_rows.append({
+                    "MU_ID": mu_id,
+                    "LEFT_OID": left["OID"], "RIGHT_OID": right["OID"],
+                    "LEFT_SEG_ID": left["SEG_ID"], "RIGHT_SEG_ID": right["SEG_ID"],
+                    "BOUNDARY_DISTANCE_M": boundary,
+                    "CENTROID_DISTANCE_M": centroid,
+                })
         components = pd.DataFrame([
             {"MU_ID": mu_id, "SEG_ID": item["SEG_ID"], "Acres": item["Acres"]}
             for item in members
