@@ -36,6 +36,7 @@ class RunConfig:
     ownership: dict[str, Any] = field(default_factory=dict)
     segmentation: dict[str, Any] = field(default_factory=dict)
     small_stands: dict[str, Any] = field(default_factory=dict)
+    proximity_chain_qa: dict[str, Any] = field(default_factory=dict)
     riparian: dict[str, Any] = field(default_factory=dict)
     inventory: dict[str, Any] = field(default_factory=dict)
     database: dict[str, Any] = field(default_factory=dict)
@@ -109,6 +110,16 @@ def load_config(path: str | Path) -> RunConfig:
         **small_stand_defaults,
         **supplied_small_stands,
     }
+    chain_qa_defaults = {
+        "enabled": True,
+        "warning_chain_ratio": 2.0,
+        "write_component_pair_csv": False,
+        "acreage_tolerance_acres": 1e-6,
+    }
+    raw["proximity_chain_qa"] = {
+        **chain_qa_defaults,
+        **dict(raw.get("proximity_chain_qa", {})),
+    }
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
@@ -146,5 +157,18 @@ def load_config(path: str | Path) -> RunConfig:
             "small_stands.maximum_combined_acres must be at least "
             "segmentation.minimum_stand_acres."
         )
+
+    try:
+        warning_ratio = float(raw["proximity_chain_qa"]["warning_chain_ratio"])
+        acreage_tolerance = float(raw["proximity_chain_qa"]["acreage_tolerance_acres"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("proximity_chain_qa ratios and tolerances must be numeric.") from exc
+    if warning_ratio <= 0 or acreage_tolerance < 0:
+        raise ValueError(
+            "proximity_chain_qa.warning_chain_ratio must be positive and "
+            "acreage_tolerance_acres must be non-negative."
+        )
+    raw["proximity_chain_qa"]["warning_chain_ratio"] = warning_ratio
+    raw["proximity_chain_qa"]["acreage_tolerance_acres"] = acreage_tolerance
 
     return RunConfig(**raw)
