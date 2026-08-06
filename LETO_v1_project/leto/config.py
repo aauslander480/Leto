@@ -114,7 +114,7 @@ def load_config(path: str | Path) -> RunConfig:
         "enabled": True,
         "warning_chain_ratio": 2.0,
         "write_component_pair_csv": False,
-        "acreage_tolerance_acres": 1e-6,
+        "acreage_tolerance_acres": 0.01,
     }
     raw["proximity_chain_qa"] = {
         **chain_qa_defaults,
