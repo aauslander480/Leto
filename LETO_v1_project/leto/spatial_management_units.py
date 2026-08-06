@@ -164,9 +164,13 @@ def _calculate_chain_qa(feature_class, *, maximum_distance_meters, warning_chain
         distances = []
         for left, right in combinations(members, 2):
             boundary = float(left["geometry"].distanceTo(right["geometry"])) * meters_per_unit
-            centroid = float(
-                left["geometry"].trueCentroid.distanceTo(right["geometry"].trueCentroid)
-            ) * meters_per_unit
+            left_centroid = arcpy.PointGeometry(
+                left["geometry"].trueCentroid, spatial_reference
+            )
+            right_centroid = arcpy.PointGeometry(
+                right["geometry"].trueCentroid, spatial_reference
+            )
+            centroid = float(left_centroid.distanceTo(right_centroid)) * meters_per_unit
             distances.append({
                 "boundary_distance_m": boundary,
                 "centroid_distance_m": centroid,
@@ -247,12 +251,12 @@ def _write_unit_attributes(unit_output, aggregate, component_output, compatibili
     }
     for field in compatibility:
         source = source_types[field]
-        kind = "TEXT" if source.type == "String" else source.type.upper()
+        kind = _add_field_type(source)
         fields_to_add[field] = (kind, source.length if kind == "TEXT" else None)
     for name in WEIGHTED_BIOLOGY_FIELDS + ("FORTYPCD_DOM",):
         if name in source_types:
             source = source_types[name]
-            kind = "TEXT" if source.type == "String" else source.type.upper()
+            kind = _add_field_type(source)
             fields_to_add[name] = (kind, source.length if kind == "TEXT" else None)
 
     existing = {field.name.upper() for field in arcpy.ListFields(unit_output)}
@@ -270,6 +274,17 @@ def _write_unit_attributes(unit_output, aggregate, component_output, compatibili
                     value = int(bool(value))
                 row[index] = value
             cursor.updateRow(row)
+
+
+def _add_field_type(field):
+    return {
+        "String": "TEXT",
+        "SmallInteger": "SHORT",
+        "Integer": "LONG",
+        "Single": "FLOAT",
+        "Double": "DOUBLE",
+        "Date": "DATE",
+    }.get(field.type, "TEXT")
 
 
 def _delete(path):
