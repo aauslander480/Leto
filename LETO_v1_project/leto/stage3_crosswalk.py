@@ -575,6 +575,64 @@ def expand_parent_weights_to_management_units(
         components = stands.rename(columns={"ParentSEG_ID": "SEG_ID"}).copy()
         if "MU_ID" not in components.columns:
             components["MU_ID"] = components["SEG_ID"]
+    multipart = (
+        components.groupby("MU_ID")["SEG_ID"].nunique().max() > 1
+    )
+    if not multipart:
+        # Preserve the verified baseline expansion byte-for-byte in the
+        # one-SEG_ID-per-MU data model.
+        donor = parent_weights.rename(columns={"SEG_ID": "ParentSEG_ID"}).copy()
+        donor = donor.drop(
+            columns=["FVS_Stand_ID", "STAND_ID"], errors="ignore"
+        )
+        mapping_columns = [
+            "SEG_ID", "MU_ID", "ParentSEG_ID", "STAND_ID",
+            "FVS_Stand_ID", "Acres",
+        ]
+        mapping_columns = [
+            column for column in mapping_columns if column in stands.columns
+        ]
+        expanded = stands[mapping_columns].merge(
+            donor,
+            on="ParentSEG_ID",
+            how="left",
+            validate="many_to_many",
+        )
+        if expanded["PLT_CN"].isna().any():
+            missing = (
+                expanded.loc[
+                    expanded["PLT_CN"].isna(), "ParentSEG_ID"
+                ]
+                .drop_duplicates()
+                .head(20)
+                .tolist()
+            )
+            raise RuntimeError(
+                "Final pieces had no parent donor weights. "
+                f"Parent SEG_ID examples: {missing}"
+            )
+        if "Acres" in expanded.columns:
+            expanded["DONOR_ACRES"] = (
+                pd.to_numeric(expanded["Acres"], errors="coerce")
+                * expanded["WEIGHT"]
+            )
+        ordered = [
+            "FVS_Stand_ID", "STAND_ID", "SEG_ID", "MU_ID",
+            "ParentSEG_ID", "PLT_CN", "TREEMAP_VALUE", "PIXEL_COUNT",
+            "STAND_PIXEL_COUNT", "DONOR_ACRES", "WEIGHT",
+        ]
+        expanded = expanded[
+            [column for column in ordered if column in expanded.columns]
+        ].sort_values(
+            ["SEG_ID", "WEIGHT"], ascending=[True, False]
+        )
+        check = expanded.groupby("SEG_ID")["WEIGHT"].sum()
+        if float((check - 1.0).abs().max()) > 1e-9:
+            raise RuntimeError(
+                "Expanded management-unit donor weights do not sum to 1."
+            )
+        return expanded.reset_index(drop=True)
+
     expanded = aggregate_management_unit_weights(parent_weights, components)
     stand_mapping = stands[["MU_ID", "STAND_ID", "FVS_Stand_ID"]].copy()
     stand_mapping["MU_ID"] = pd.to_numeric(
