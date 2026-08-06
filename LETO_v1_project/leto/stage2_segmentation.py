@@ -64,9 +64,7 @@ nhd_waterbody = (
 # Add one or more state feature classes or shapefiles to this list. The script
 # clips, merges, and dissolves them automatically, so state boundaries do not
 # affect wetland-percentage calculations.
-NWI_WETLAND_INPUTS = [
-   r"D:\Misc\Stream_buffer_data\FL_geodatabase_wetlands\FL_geodatabase_wetlands.gdb\FL_Wetlands"
-]
+NWI_WETLAND_INPUTS = []
 
 # Riparian-processing outputs.
 riparian_buffer = os.path.join(output_gdb, "Riparian_Buffer")
@@ -113,7 +111,7 @@ SIMILAR_MERGE_MAX_PASSES = None
 # ============================================================
 
 # Set to False to run only the original stand segmentation.
-CREATE_RIPARIAN_STANDS = True
+CREATE_RIPARIAN_STANDS = None
 
 # These are editable first-pass assumptions. They are intentionally stored in
 # one place so other states or later Florida BMP refinements can use different
@@ -135,8 +133,8 @@ AREA_BUFFER_RULES = {}
 # Classify each original TreeMap stand from all polygons in the listed USFWS
 # National Wetlands Inventory inputs. No attribute filtering is performed.
 # The final riparian-split pieces inherit the original-stand classification.
-CLASSIFY_WETLANDS = False
-WETLAND_MAJORITY_THRESHOLD = 50.0
+CLASSIFY_WETLANDS = None
+WETLAND_MAJORITY_THRESHOLD = None
 
 # Final management codes. Riparian always has first priority.
 UPLAND_MANAGEMENT_CODE = None
@@ -150,7 +148,7 @@ WETLAND_MANAGEMENT_CODE = None
 # OWNERSHIP RASTER SETTINGS
 # ============================================================
 
-USE_OWNERSHIP_HARD_BOUNDARIES = True
+USE_OWNERSHIP_HARD_BOUNDARIES = None
 
 # National Forest Service ownership raster from RDS-2025-0045.
 # Update this path to the downloaded raster on your computer.
@@ -164,7 +162,7 @@ UNKNOWN_OWNERSHIP_TYPE = None
 
 # Non-forest and water are not ownership classes. Converting them to
 # Unknown prevents them from creating extra hard boundaries.
-COLLAPSE_NONFOREST_AND_WATER = True
+COLLAPSE_NONFOREST_AND_WATER = None
 NONFOREST_AND_WATER_CODES = ()
 
 ownership_projected_temp = os.path.join(
