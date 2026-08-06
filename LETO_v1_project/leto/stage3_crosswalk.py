@@ -476,7 +476,9 @@ def build_weights_table(
 
 def read_stand_polygons(polygon_path, return_components=False):
     """Read polygon components and aggregate one FVS stand per final MU_ID."""
-    parent_field = find_field(polygon_path, ["SEG_ID", "GRIDCODE", "VALUE"], True)
+    parent_field = find_field(
+        polygon_path, ["SEG_ID", "GRIDCODE", "VALUE", "MU_ID"], True
+    )
     mu_field = find_field(polygon_path, ["MU_ID", "FINAL_ID"], True)
     excluded_types = {"OID", "Geometry", "Blob", "Raster", "GUID", "GlobalID"}
     attribute_fields = [
