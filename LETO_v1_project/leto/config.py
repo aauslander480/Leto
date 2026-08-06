@@ -32,6 +32,8 @@ class RunConfig:
     use_ownership_hard_boundaries: bool = True
     ownership_source_raster: str | None = None
     collapse_nonforest_and_water: bool = True
+    raster_model: dict[str, Any] = field(default_factory=dict)
+    ownership: dict[str, Any] = field(default_factory=dict)
     segmentation: dict[str, Any] = field(default_factory=dict)
     riparian: dict[str, Any] = field(default_factory=dict)
     inventory: dict[str, Any] = field(default_factory=dict)
@@ -86,6 +88,8 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("use_ownership_hard_boundaries", True)
     raw.setdefault("ownership_source_raster", None)
     raw.setdefault("collapse_nonforest_and_water", True)
+    raw.setdefault("raster_model", {})
+    raw.setdefault("ownership", {})
     raw.setdefault("segmentation", {})
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
