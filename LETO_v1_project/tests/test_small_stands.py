@@ -99,3 +99,25 @@ def test_area_weighted_donor_aggregation_matches_example():
     assert abs(weights["Plot3"] - 0.3333333333333333) < 1e-12
     assert abs(result["WEIGHT"].sum() - 1.0) < 1e-12
     assert result["DONOR_ACRES"].sum() == 15.0
+
+
+def test_repeated_plot_donors_are_consolidated_across_segments():
+    parent_weights = pd.DataFrame(
+        {
+            "SEG_ID": [1, 1, 2, 2],
+            "PLT_CN": ["shared", "one", "shared", "two"],
+            "WEIGHT": [0.5, 0.5, 0.25, 0.75],
+        }
+    )
+    components = pd.DataFrame(
+        {"SEG_ID": [1, 2], "MU_ID": [99, 99], "Acres": [4.0, 6.0]}
+    )
+
+    result = aggregate_management_unit_weights(parent_weights, components)
+    weights = result.set_index("PLT_CN")["WEIGHT"]
+
+    assert len(result) == 3
+    assert abs(weights["shared"] - 0.35) < 1e-12
+    assert abs(weights["one"] - 0.20) < 1e-12
+    assert abs(weights["two"] - 0.45) < 1e-12
+    assert abs(result["WEIGHT"].sum() - 1.0) < 1e-12
