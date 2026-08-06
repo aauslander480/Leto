@@ -19,6 +19,7 @@ from . import stage2_segmentation as s2
 from . import stage3_crosswalk as s3
 from . import stage4_inventory as s4
 from . import stage5_database as s5
+from .spatial_management_units import finalize_management_outputs
 
 
 def _option(options: dict[str, Any], name: str, default: Any) -> Any:
@@ -209,8 +210,9 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.segment_raster = os.path.join(paths["segmentation"], "TreeMap_Segments_Initial.tif")
     s2.segment_polygons = os.path.join(config.working_gdb, "TreeMap_Segments_Initial")
     s2.segment_summary_csv = os.path.join(paths["segmentation"], "TreeMap_Segment_Summary.csv")
+    s2.management_segments_final = os.path.join(config.working_gdb, "ManagementSegments_Final")
     s2.management_units_final = os.path.join(config.working_gdb, "ManagementUnits_Final")
-    s2.riparian_split_stands = s2.management_units_final
+    s2.riparian_split_stands = s2.management_segments_final
     s2.riparian_buffer = os.path.join(config.working_gdb, "Riparian_Buffer")
     s2.ownership_aligned_raster = os.path.join(paths["segmentation"], "Ownership_Classes_Aligned.tif")
     s2.wetland_footprint = os.path.join(config.working_gdb, "NWI_Wetlands_Dissolved")
@@ -296,10 +298,34 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         _configure_stage2(config, paths, raster_outputs)
         s2.main()
         create_riparian = config.riparian["create_riparian_stands"]
-        management_units = (
-            s2.management_units_final
-            if create_riparian
-            else _ensure_management_units(s2.segment_polygons, s2.management_units_final)
+        if create_riparian:
+            component_source = s2.management_segments_final
+        else:
+            component_source = _ensure_management_units(
+                s2.segment_polygons, s2.management_segments_final
+            )
+        chain = config.proximity_chain_qa
+        stage2_mu_qa = finalize_management_outputs(
+            component_source,
+            s2.management_segments_final,
+            s2.management_units_final,
+            proximity_enabled=(
+                config.small_stands["remaining_small_stand_action"]
+                == "proximity_merge"
+            ),
+            maximum_distance_meters=config.small_stands["maximum_distance_meters"],
+            warning_chain_ratio=chain["warning_chain_ratio"],
+            qa_folder=paths["qa"],
+            write_component_pair_csv=chain["write_component_pair_csv"],
+            acreage_tolerance_acres=chain["acreage_tolerance_acres"],
+        )
+        management_segments = s2.management_segments_final
+        management_units = s2.management_units_final
+        message(
+            "Stage 2 final outputs: "
+            f"{stage2_mu_qa['component_polygons']:,} component polygons; "
+            f"{stage2_mu_qa['final_management_units']:,} dissolved units; "
+            f"acreage discrepancy={stage2_mu_qa['acreage_discrepancy']:.9f}"
         )
 
     with timed_stage("Stage 3 - Build donor crosswalk", timings):
@@ -313,9 +339,8 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         s3.inventory_year = config.inventory_year
         s3.variant = config.fvs_variant
         s3.state = config.fvs_state
-        stands_df, components_df = s3.read_stand_polygons(
-            management_units, return_components=True
-        )
+        stands_df = s3.read_management_units(management_units)
+        components_df = s3.read_management_segments(management_segments)
         s3.validate_segment_ids(parent_weights, stands_df, components_df)
         weights_df = s3.expand_parent_weights_to_management_units(
             parent_weights, stands_df, components_df
@@ -399,6 +424,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "qa_metrics": {
             **qa_metrics,
             "proximity_merge": dict(s2.PROXIMITY_MERGE_QA),
+            "proximity_chain_qa": stage2_mu_qa,
         },
     }
     Path(paths["run"], "Run_Summary.json").write_text(
@@ -436,6 +462,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "config": config,
         "paths": paths,
         "rasters": raster_outputs,
+        "management_segments": management_segments,
         "management_units": management_units,
         "stands": stands_df,
         "weights": weights_filtered,
