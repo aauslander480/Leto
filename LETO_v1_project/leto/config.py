@@ -92,14 +92,23 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("raster_model", {})
     raw.setdefault("ownership", {})
     raw.setdefault("segmentation", {})
-    raw.setdefault(
-        "small_stands",
-        {
-            "remaining_small_stand_action": raw["segmentation"].get(
-                "remaining_small_stand_action", "retain"
-            ),
-        },
-    )
+    small_stand_defaults = {
+        "remaining_small_stand_action": raw["segmentation"].get(
+            "remaining_small_stand_action", "retain"
+        ),
+        "maximum_distance_meters": 60.0,
+        "require_same_ownership": True,
+        "require_same_forest_type": True,
+        "maximum_combined_acres": raw["segmentation"].get(
+            "maximum_stand_acres", 300.0
+        ),
+        "retain_when_no_candidate": True,
+    }
+    supplied_small_stands = dict(raw.get("small_stands", {}))
+    raw["small_stands"] = {
+        **small_stand_defaults,
+        **supplied_small_stands,
+    }
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
