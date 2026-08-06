@@ -242,6 +242,7 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.PROXIMITY_QA_CSV = os.path.join(
         paths["qa"], "Proximity_Merge_Pairs.csv"
     )
+    s2.PROXIMITY_MERGE_QA = {}
 
     s2.USE_OWNERSHIP_HARD_BOUNDARIES = (
         config.use_ownership_attributes and config.use_ownership_hard_boundaries
