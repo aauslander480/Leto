@@ -118,6 +118,27 @@ def _prepare_stands_dataframe(stands: pd.DataFrame, config: RunConfig) -> pd.Dat
     return stands
 
 
+def _validate_final_inventory(stands, final_stands, trees):
+    """Enforce one stand row per MU and complete tree-list coverage."""
+    for label, frame in (("stand list", stands), ("final stand list", final_stands)):
+        if frame["STAND_ID"].astype(str).duplicated().any():
+            raise RuntimeError(f"{label} contains duplicate STAND_ID values.")
+    expected = set(final_stands["STAND_ID"].astype(str))
+    tree_ids = set(trees["STAND_ID"].astype(str))
+    missing = sorted(expected - tree_ids)
+    unknown = sorted(tree_ids - expected)
+    if missing:
+        raise RuntimeError(
+            f"Final FVS stands without tree records: {missing[:20]}"
+        )
+    if unknown:
+        raise RuntimeError(
+            f"Tree records reference unknown final stands: {unknown[:20]}"
+        )
+    if len(final_stands) != len(expected):
+        raise RuntimeError("Final FVS stand count differs from unique STAND_ID count.")
+
+
 def _write_dataframe_outputs(
     paths: dict[str, str],
     stands: pd.DataFrame,
@@ -388,6 +409,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         tree_list, qa_metrics = s4.build_tree_list(weights_filtered, species_lookup)
         tree_list, still_missing = s4.impute_missing_tree_lists(stands_df, tree_list)
         final_stands = s4.build_final_stands(stands_df, weights_filtered, tree_list)
+        _validate_final_inventory(stands_df, final_stands, tree_list)
         if (
             config.small_stands["remaining_small_stand_action"]
             == "proximity_merge"
@@ -403,6 +425,12 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
 
     with timed_stage("Stage 5 - Create FVS databases", timings):
         db_summary = _build_databases(config, paths, final_stands, tree_list)
+        if config.database["mode"] == "grouped":
+            grouped_stands = int(db_summary["STANDS"].sum())
+            if grouped_stands != int(final_stands["STAND_ID"].nunique()):
+                raise RuntimeError(
+                    "Grouped database stand counts do not equal unique final stands."
+                )
 
     finished = datetime.now()
     timing_rows = [{"STAGE": item.name, "SECONDS": item.seconds} for item in timings]
