@@ -22,7 +22,12 @@ forest_type_raster = None
 basal_area_raster = None
 qmd_raster = None
 tpa_raster = None
-source_nodata = -999999
+source_nodata = None
+forest_condition_status_code = None
+live_tree_status_code = None
+output_nodata = None
+coverage_check_nodata = None
+stored_value_multipliers = {}
 
 # ============================================================
 # HELPERS
@@ -119,7 +124,7 @@ def select_dominant_conditions(conditions):
     """
 
     forest = conditions[
-        conditions["COND_STATUS_CD"] == 1
+        conditions["COND_STATUS_CD"] == forest_condition_status_code
     ].copy()
 
     forest = forest[
@@ -234,7 +239,7 @@ def read_and_summarize_trees(
         # Keep live trees with usable diameter and expansion
         # factors.
         trees = trees[
-            (trees["STATUSCD"] == 1)
+            (trees["STATUSCD"] == live_tree_status_code)
             & trees["PLT_CN"].notna()
             & trees["CONDID"].notna()
             & trees["DIA"].notna()
@@ -785,7 +790,9 @@ def configure(config):
     global treemap_raster, treemap_lookup_raster, fia_tree_files, fia_cond_files
     global output_folder, treemap_plt_field, clip_boundary, working_gdb
     global lookup_csv, age_raster, forest_type_raster, basal_area_raster
-    global qmd_raster, tpa_raster
+    global qmd_raster, tpa_raster, source_nodata
+    global forest_condition_status_code, live_tree_status_code
+    global output_nodata, coverage_check_nodata, stored_value_multipliers
 
     treemap_raster = config["treemap_raster"]
     treemap_lookup_raster = config.get("treemap_lookup_raster") or treemap_raster
@@ -795,6 +802,12 @@ def configure(config):
     treemap_plt_field = config.get("treemap_plt_field", "PLT_CN")
     clip_boundary = config.get("clip_boundary")
     working_gdb = config["working_gdb"]
+    forest_condition_status_code = config["forest_condition_status_code"]
+    live_tree_status_code = config["live_tree_status_code"]
+    source_nodata = config["source_nodata"]
+    output_nodata = config["output_nodata"]
+    coverage_check_nodata = config["coverage_check_nodata"]
+    stored_value_multipliers = dict(config["stored_value_multipliers"])
 
     lookup_csv = os.path.join(output_folder, "TreeMap_PLT_CN_Segmentation_Lookup.csv")
     age_raster = os.path.join(output_folder, "TreeMap_STDAGE.tif")
@@ -983,8 +996,6 @@ def run_stage(config):
     cell_height = description.meanCellHeight
     spatial_reference = description.spatialReference
 
-    source_nodata = -999999
-
     message("Reading TreeMap raster into a NumPy array...")
 
     source_array = arcpy.RasterToNumPyArray(
@@ -1043,8 +1054,8 @@ def run_stage(config):
         cell_height=cell_height,
         spatial_reference=spatial_reference,
         output_dtype=np.int16,
-        output_nodata=-9999,
-        decimal_multiplier=1.0,
+        output_nodata=output_nodata,
+        decimal_multiplier=stored_value_multipliers["STDAGE"],
     )
 
     # FIA forest type code.
@@ -1058,8 +1069,8 @@ def run_stage(config):
         cell_height=cell_height,
         spatial_reference=spatial_reference,
         output_dtype=np.int16,
-        output_nodata=-9999,
-        decimal_multiplier=1.0,
+        output_nodata=output_nodata,
+        decimal_multiplier=stored_value_multipliers["FORTYPCD"],
     )
 
     # BALIVE is stored in tenths of square feet per acre.
@@ -1075,8 +1086,8 @@ def run_stage(config):
         cell_height=cell_height,
         spatial_reference=spatial_reference,
         output_dtype=np.int32,
-        output_nodata=-9999,
-        decimal_multiplier=10.0,
+        output_nodata=output_nodata,
+        decimal_multiplier=stored_value_multipliers["BALIVE"],
     )
 
     # QMD is stored in tenths of an inch.
@@ -1092,8 +1103,8 @@ def run_stage(config):
         cell_height=cell_height,
         spatial_reference=spatial_reference,
         output_dtype=np.int16,
-        output_nodata=-9999,
-        decimal_multiplier=10.0,
+        output_nodata=output_nodata,
+        decimal_multiplier=stored_value_multipliers["QMD"],
     )
 
     # TPA is stored in tenths of a tree per acre.
@@ -1109,8 +1120,8 @@ def run_stage(config):
         cell_height=cell_height,
         spatial_reference=spatial_reference,
         output_dtype=np.int32,
-        output_nodata=-9999,
-        decimal_multiplier=10.0,
+        output_nodata=output_nodata,
+        decimal_multiplier=stored_value_multipliers["TPA"],
     )
 
 
@@ -1137,12 +1148,12 @@ def run_stage(config):
     ]:
         check_array = arcpy.RasterToNumPyArray(
             raster_path,
-            nodata_to_value=-999999999,
+            nodata_to_value=coverage_check_nodata,
         )
 
         assigned_count = int(
             np.count_nonzero(
-                check_array != -999999999
+                check_array != coverage_check_nodata
             )
         )
 
