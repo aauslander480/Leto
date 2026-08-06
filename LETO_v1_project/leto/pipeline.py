@@ -143,7 +143,7 @@ def _build_databases(
         )
 
     options = config.database
-    mode = _option(options, "mode", "grouped")
+    mode = options["mode"]
     stands = final_stands.copy()
     if "DB_GROUP" not in stands.columns:
         stands["DB_GROUP"] = "All_Stands"
@@ -164,6 +164,11 @@ def _build_databases(
     s5.fvs_state_code = config.fvs_state_code
     s5.default_inv_year = config.inventory_year
     s5.stand_group_name = config.stand_group_name
+    s5.basal_area_factor = options["basal_area_factor"]
+    s5.inv_plot_size = options["inventory_plot_size"]
+    s5.brk_dbh = options["breakpoint_dbh"]
+    s5.num_plots = options["number_of_plots"]
+    s5.nonstk_plots = options["nonstockable_plots"]
 
     summaries = []
     for group_name, group_stands in groups:
@@ -209,37 +214,50 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.wetland_footprint = os.path.join(config.working_gdb, "NWI_Wetlands_Dissolved")
     s2.ownership_projected_temp = os.path.join(config.working_gdb, "_ownership_projected")
 
-    s2.INITIAL_SEED_ACRES = _option(seg, "initial_seed_acres", 100.0)
-    s2.MIN_STAND_ACRES = _option(seg, "minimum_stand_acres", 5.0)
-    s2.MAX_STAND_ACRES = _option(seg, "maximum_stand_acres", 300.0)
-    s2.MAX_ITERATIONS = _option(seg, "maximum_iterations", 40)
-    s2.CONVERGENCE_THRESHOLD = _option(seg, "convergence_threshold", 0.01)
-    s2.MINIMUM_SCORE_IMPROVEMENT = _option(seg, "minimum_score_improvement", 0.01)
-    s2.USE_EIGHT_NEIGHBORS = _option(seg, "use_eight_neighbors", False)
-    s2.SHARED_EDGE_BONUS = _option(seg, "shared_edge_bonus", 0.2)
-    s2.WEIGHTS = dict(_option(seg, "variable_weights", {
-        "FORTYPCD": 0.30, "STDAGE": 0.25, "BALIVE": 0.20,
-        "QMD": 0.15, "TPA": 0.10,
-    }))
-    s2.MERGE_SIMILAR_STANDS = _option(seg, "merge_similar_stands", True)
-    s2.SIMILAR_MERGE_MAX_AGE_DIFFERENCE = _option(seg, "similar_merge_max_age_difference", 10.0)
-    s2.SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = _option(seg, "similar_merge_require_same_fortypcd", True)
-    s2.SIMILAR_MERGE_MIN_SHARED_EDGES = _option(seg, "similar_merge_min_shared_edges", 2)
-    s2.REMAINING_SMALL_STAND_ACTION = _option(seg, "remaining_small_stand_action", "force_merge")
+    s2.INITIAL_SEED_ACRES = seg["initial_seed_acres"]
+    s2.MIN_STAND_ACRES = seg["minimum_stand_acres"]
+    s2.MAX_STAND_ACRES = seg["maximum_stand_acres"]
+    s2.MAX_ITERATIONS = seg["maximum_iterations"]
+    s2.CONVERGENCE_THRESHOLD = seg["convergence_threshold"]
+    s2.MINIMUM_SCORE_IMPROVEMENT = seg["minimum_score_improvement"]
+    s2.USE_EIGHT_NEIGHBORS = seg["use_eight_neighbors"]
+    s2.SHARED_EDGE_BONUS = seg["shared_edge_bonus"]
+    s2.Z_CLIP = seg["standardization_clip"]
+    s2.READ_NODATA = seg["read_nodata"]
+    s2.REPORT_TIMING = seg["report_timing"]
+    s2.WEIGHTS = dict(seg["variable_weights"])
+    s2.MERGE_SIMILAR_STANDS = seg["merge_similar_stands"]
+    s2.SIMILAR_MERGE_MAX_AGE_DIFFERENCE = seg["similar_merge_max_age_difference"]
+    s2.SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = seg["similar_merge_require_same_fortypcd"]
+    s2.SIMILAR_MERGE_MIN_SHARED_EDGES = seg["similar_merge_min_shared_edges"]
+    s2.SIMILAR_MERGE_MAX_PASSES = seg["similar_merge_max_passes"]
+    s2.REMAINING_SMALL_STAND_ACTION = seg["remaining_small_stand_action"]
 
     s2.USE_OWNERSHIP_HARD_BOUNDARIES = (
         config.use_ownership_attributes and config.use_ownership_hard_boundaries
     )
     s2.OWNERSHIP_SOURCE_RASTER = config.ownership_source_raster
     s2.COLLAPSE_NONFOREST_AND_WATER = config.collapse_nonforest_and_water
+    ownership = config.ownership
+    s2.OWNERSHIP_TYPES = dict(ownership["types"])
+    s2.UNKNOWN_OWNERSHIP_CODE = ownership["unknown_code"]
+    s2.UNKNOWN_OWNERSHIP_TYPE = ownership["unknown_type"]
+    s2.NONFOREST_AND_WATER_CODES = tuple(ownership["nonforest_and_water_codes"])
 
-    s2.CREATE_RIPARIAN_STANDS = _option(rip, "create_riparian_stands", True)
-    s2.CLASSIFY_WETLANDS = _option(rip, "classify_wetlands", False)
-    s2.NWI_WETLAND_INPUTS = list(_option(rip, "nwi_wetland_inputs", []))
-    s2.WETLAND_MAJORITY_THRESHOLD = _option(rip, "wetland_majority_threshold", 50.0)
-    s2.nhd_flowline = _option(rip, "nhd_flowline", None)
-    s2.nhd_area = _option(rip, "nhd_area", None)
-    s2.nhd_waterbody = _option(rip, "nhd_waterbody", None)
+    s2.CREATE_RIPARIAN_STANDS = rip["create_riparian_stands"]
+    s2.CLASSIFY_WETLANDS = rip["classify_wetlands"]
+    s2.NWI_WETLAND_INPUTS = list(rip["nwi_wetland_inputs"])
+    s2.WETLAND_MAJORITY_THRESHOLD = rip["wetland_majority_threshold"]
+    s2.FLOWLINE_BUFFER_RULES = dict(rip["flowline_buffer_rules"])
+    s2.WATERBODY_BUFFER_RULES = dict(rip["waterbody_buffer_rules"])
+    s2.AREA_BUFFER_RULES = dict(rip["area_buffer_rules"])
+    management_codes = rip["management_codes"]
+    s2.UPLAND_MANAGEMENT_CODE = management_codes["upland"]
+    s2.RIPARIAN_MANAGEMENT_CODE = management_codes["riparian"]
+    s2.WETLAND_MANAGEMENT_CODE = management_codes["wetland"]
+    s2.nhd_flowline = rip["nhd_flowline"]
+    s2.nhd_area = rip["nhd_area"]
+    s2.nhd_waterbody = rip["nhd_waterbody"]
 
 
 def run_pipeline(config: RunConfig) -> dict[str, Any]:
@@ -260,12 +278,13 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
             "output_folder": paths["rasters"],
             "working_gdb": config.working_gdb,
             "clip_boundary": config.study_area,
+            **config.raster_model,
         })
 
     with timed_stage("Stage 2 - Segment landscape and build management units", timings):
         _configure_stage2(config, paths, raster_outputs)
         s2.main()
-        create_riparian = _option(config.riparian, "create_riparian_stands", True)
+        create_riparian = config.riparian["create_riparian_stands"]
         management_units = (
             s2.management_units_final
             if create_riparian
@@ -290,13 +309,23 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
 
     with timed_stage("Stage 4 - Build weighted FVS inventory", timings):
         stands_df = _prepare_stands_dataframe(stands_df, config)
-        minimum_weight = float(_option(config.inventory, "minimum_plot_weight", 0.05))
+        minimum_weight = float(config.inventory["minimum_plot_weight"])
         weights_filtered = _filter_weights(weights_df, minimum_weight)
         s4.fia_tree_files = list(config.fia_tree_files)
         s4.species_crosswalk_xls = config.species_crosswalk
         s4.species_crosswalk_sheet = config.species_crosswalk_sheet
         s4.MIN_PLT_WEIGHT = minimum_weight
-        s4.IMPUTE_MISSING_STANDS = bool(_option(config.inventory, "impute_missing_stands", True))
+        s4.IMPUTE_MISSING_STANDS = bool(config.inventory["impute_missing_stands"])
+        s4.LIVE_TREE_STATUS_CODE = config.inventory["live_tree_status_code"]
+        s4.FIA_TREE_CSV_CHUNKSIZE = config.inventory["fia_tree_csv_chunksize"]
+        s4.SPECIES_CROSSWALK_FIA_COLUMNS = tuple(
+            config.inventory["species_crosswalk_fia_columns"]
+        )
+        s4.SPECIES_CROSSWALK_FVS_COLUMNS = tuple(
+            config.inventory["species_crosswalk_fvs_columns"]
+        )
+        s4.NEAREST_SEARCH_RADIUS = config.inventory["nearest_search_radius"]
+        s4.NEAREST_METHOD = config.inventory["nearest_method"]
         s4.stand_polygons = management_units
         s4.near_table = os.path.join(config.working_gdb, "missing_segment_to_nearest_runnable")
         s4.qa_missing_species_csv = os.path.join(paths["qa"], "QA_Missing_FVS_Species.csv")

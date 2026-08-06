@@ -125,7 +125,13 @@ STATE = "ME"
 
 # If True, a segment with no usable live trees borrows the complete weighted
 # tree list from its nearest segment that does have usable trees.
-IMPUTE_MISSING_STANDS = True
+IMPUTE_MISSING_STANDS = None
+LIVE_TREE_STATUS_CODE = None
+FIA_TREE_CSV_CHUNKSIZE = None
+SPECIES_CROSSWALK_FIA_COLUMNS = ()
+SPECIES_CROSSWALK_FVS_COLUMNS = ()
+NEAREST_SEARCH_RADIUS = None
+NEAREST_METHOD = None
 
 near_table = os.path.join(
     segment_gdb,
@@ -447,12 +453,12 @@ def read_species_lookup():
 
     fia_field = first_existing_column(
         crosswalk,
-        ["FIA CODE", "FIA_CODE", "FIACODE"],
+        SPECIES_CROSSWALK_FIA_COLUMNS,
     )
 
     fvs_field = first_existing_column(
         crosswalk,
-        ["SN_Mapped_To", "SN MAPPED TO"],
+        SPECIES_CROSSWALK_FVS_COLUMNS,
     )
 
     if fia_field is None or fvs_field is None:
@@ -542,7 +548,7 @@ def read_fia_trees(required_plt_cns):
             path,
             dtype=str,
             usecols=available,
-            chunksize=250_000,
+            chunksize=FIA_TREE_CSV_CHUNKSIZE,
             low_memory=False,
         ):
             chunk["PLT_CN"] = clean_identifier(
@@ -641,7 +647,7 @@ def build_tree_list(weights, species_lookup):
     ].copy()
 
     joined = joined[
-        joined["STATUSCD"].astype(str) == "1"
+        joined["STATUSCD"].astype(str) == str(LIVE_TREE_STATUS_CODE)
     ].copy()
 
     joined["Species_FIA"] = joined["SPCD"]
@@ -1042,12 +1048,12 @@ def impute_missing_tree_lists(
         in_features="missing_segment_lyr",
         near_features="runnable_segment_lyr",
         out_table=near_table,
-        search_radius="",
+        search_radius=NEAREST_SEARCH_RADIUS,
         location="NO_LOCATION",
         angle="NO_ANGLE",
         closest="CLOSEST",
         closest_count=1,
-        method="PLANAR",
+        method=NEAREST_METHOD,
     )
 
     oid_to_segment = {}
