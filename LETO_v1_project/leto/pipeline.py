@@ -319,6 +319,20 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         weights_df = s3.expand_parent_weights_to_management_units(
             parent_weights, stands_df, components_df
         )
+        weight_key = "MU_ID" if "MU_ID" in weights_df.columns else "SEG_ID"
+        donor_weight_error = float(
+            (
+                weights_df.groupby(weight_key)["WEIGHT"].sum() - 1.0
+            ).abs().max()
+        )
+        if donor_weight_error > 1e-9:
+            raise RuntimeError(
+                "Final management-unit donor weights do not sum to 1."
+            )
+        message(
+            "Maximum final donor-weight sum error: "
+            f"{donor_weight_error:.12f}"
+        )
         weights_df.to_csv(Path(paths["crosswalk"]) / "Segment_PLT_CN_Weights.csv", index=False)
 
     with timed_stage("Stage 4 - Build weighted FVS inventory", timings):
@@ -348,6 +362,15 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         tree_list, qa_metrics = s4.build_tree_list(weights_filtered, species_lookup)
         tree_list, still_missing = s4.impute_missing_tree_lists(stands_df, tree_list)
         final_stands = s4.build_final_stands(stands_df, weights_filtered, tree_list)
+        if (
+            config.small_stands["remaining_small_stand_action"]
+            == "proximity_merge"
+            and not still_missing.empty
+        ):
+            raise RuntimeError(
+                "Proximity-merge run left FVS stands without trees."
+            )
+        qa_metrics["donor_weight_maximum_error"] = donor_weight_error
         _write_dataframe_outputs(
             paths, stands_df, weights_filtered, final_stands, tree_list, still_missing
         )
