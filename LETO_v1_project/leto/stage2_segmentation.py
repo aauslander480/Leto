@@ -87,37 +87,25 @@ wetland_footprint = os.path.join(output_gdb, "NWI_Wetlands_Dissolved")
 # SEGMENTATION SETTINGS
 # ============================================================
 
-INITIAL_SEED_ACRES = 100.0
-MIN_STAND_ACRES = 5.0
-MAX_STAND_ACRES = 300.0
-
-MAX_ITERATIONS = 40
-CONVERGENCE_THRESHOLD = 0.01
-MINIMUM_SCORE_IMPROVEMENT = 0.01
-USE_EIGHT_NEIGHBORS = False
-
-WEIGHTS = {
-    "FORTYPCD": 0.30,
-    "STDAGE": 0.25,
-    "BALIVE": 0.20,
-    "QMD": 0.15,
-    "TPA": 0.10,
-}
-
-SHARED_EDGE_BONUS = 0.2
-Z_CLIP = 4.0
-READ_NODATA = -999999
-REMAINING_SMALL_STAND_ACTION = "delete"  # delete, retain, or force_merge
-
-# Print a progress message during long vectorized stages.
-REPORT_TIMING = True
-
-# Optional post-processing merge for biologically similar adjacent stands.
-MERGE_SIMILAR_STANDS = True
-SIMILAR_MERGE_MAX_AGE_DIFFERENCE = 10.0  # years
-SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = True
-SIMILAR_MERGE_MIN_SHARED_EDGES = 2
-SIMILAR_MERGE_MAX_PASSES = 50
+# Populated from the selected regional configuration by pipeline.py.
+INITIAL_SEED_ACRES = None
+MIN_STAND_ACRES = None
+MAX_STAND_ACRES = None
+MAX_ITERATIONS = None
+CONVERGENCE_THRESHOLD = None
+MINIMUM_SCORE_IMPROVEMENT = None
+USE_EIGHT_NEIGHBORS = None
+WEIGHTS = {}
+SHARED_EDGE_BONUS = None
+Z_CLIP = None
+READ_NODATA = None
+REMAINING_SMALL_STAND_ACTION = None
+REPORT_TIMING = None
+MERGE_SIMILAR_STANDS = None
+SIMILAR_MERGE_MAX_AGE_DIFFERENCE = None
+SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = None
+SIMILAR_MERGE_MIN_SHARED_EDGES = None
+SIMILAR_MERGE_MAX_PASSES = None
 
 
 # ============================================================
@@ -130,32 +118,10 @@ CREATE_RIPARIAN_STANDS = True
 # These are editable first-pass assumptions. They are intentionally stored in
 # one place so other states or later Florida BMP refinements can use different
 # distances without changing the geometry-processing functions.
-FLOWLINE_BUFFER_RULES = {
-    46000: ("Unclassified Stream", 0.0),
-    46003: ("Intermittent Stream", 0.0),
-    46006: ("Perennial Stream", 45.0),
-    46007: ("Ephemeral Stream", 0.0),
-}
-
-WATERBODY_BUFFER_RULES = {
-    39000: ("Unclassified Lake/Pond", 0.0),
-    39001: ("Intermittent Lake/Pond", 0.0),
-    39005: ("Intermittent Lake/Pond", 0.0),
-    39006: ("Intermittent Lake/Pond", 0.0),
-    39004: ("Perennial Lake/Pond", 45.0),
-    39009: ("Perennial Lake/Pond", 45.0),
-    39010: ("Perennial Lake/Pond", 45.0),
-    39011: ("Perennial Lake/Pond", 45.0),
-    39012: ("Perennial Lake/Pond", 45.0),
-}
-
-AREA_BUFFER_RULES = {
-    46000: ("Unclassified Stream/River Area", 0.0),
-    46003: ("Intermittent Stream/River Area", 0.0),
-    46006: ("Perennial Stream/River Area", 45.0),
-    46007: ("Ephemeral Stream/River Area", 0.0),
-    53700: ("Area of Complex Channels", 45.0),
-}
+# Populated from the selected regional configuration by pipeline.py.
+FLOWLINE_BUFFER_RULES = {}
+WATERBODY_BUFFER_RULES = {}
+AREA_BUFFER_RULES = {}
 
 # No minimum-area deletion is performed after the riparian split. Narrow
 # riparian pieces are intentional management units rather than segmentation
@@ -173,9 +139,9 @@ CLASSIFY_WETLANDS = False
 WETLAND_MAJORITY_THRESHOLD = 50.0
 
 # Final management codes. Riparian always has first priority.
-UPLAND_MANAGEMENT_CODE = 0
-RIPARIAN_MANAGEMENT_CODE = 1
-WETLAND_MANAGEMENT_CODE = 2
+UPLAND_MANAGEMENT_CODE = None
+RIPARIAN_MANAGEMENT_CODE = None
+WETLAND_MANAGEMENT_CODE = None
 
 
 
@@ -192,25 +158,14 @@ OWNERSHIP_SOURCE_RASTER = (
     r"D:\forest_condition_2026\Stand_delineation\RDS-2025-0045 (1)\Data\US_forest_ownership.tif"
 )
 
-OWNERSHIP_TYPES = {
-    0: "Unknown",
-    1: "NonForest",
-    2: "Water",
-    3: "Family",
-    4: "Corporate",
-    5: "Tribal",
-    6: "Federal",
-    7: "State",
-    8: "Local",
-}
-
-UNKNOWN_OWNERSHIP_CODE = 0
-UNKNOWN_OWNERSHIP_TYPE = "Unknown"
+OWNERSHIP_TYPES = {}
+UNKNOWN_OWNERSHIP_CODE = None
+UNKNOWN_OWNERSHIP_TYPE = None
 
 # Non-forest and water are not ownership classes. Converting them to
 # Unknown prevents them from creating extra hard boundaries.
 COLLAPSE_NONFOREST_AND_WATER = True
-NONFOREST_AND_WATER_CODES = (1, 2)
+NONFOREST_AND_WATER_CODES = ()
 
 ownership_projected_temp = os.path.join(
     output_gdb,
