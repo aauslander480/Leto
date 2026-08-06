@@ -58,7 +58,8 @@ def _ensure_management_units(segment_polygons: str, output_fc: str) -> str:
         for row in cursor:
             oid = int(row[0])
             seg_id = int(row[1])
-            row[2] = oid
+            if row[2] is None:
+                row[2] = oid
             row[3] = oid
             row[4] = f"SEG_{seg_id}"
             row[5] = float(row[6].getArea("GEODESIC", "ACRES"))
@@ -195,6 +196,7 @@ def _build_databases(
 
 def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[str, str]) -> None:
     seg = config.segmentation
+    small = config.small_stands
     rip = config.riparian
 
     s2.age_raster = rasters["age_raster"]
@@ -231,7 +233,15 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = seg["similar_merge_require_same_fortypcd"]
     s2.SIMILAR_MERGE_MIN_SHARED_EDGES = seg["similar_merge_min_shared_edges"]
     s2.SIMILAR_MERGE_MAX_PASSES = seg["similar_merge_max_passes"]
-    s2.REMAINING_SMALL_STAND_ACTION = seg["remaining_small_stand_action"]
+    s2.REMAINING_SMALL_STAND_ACTION = small["remaining_small_stand_action"]
+    s2.PROXIMITY_MAXIMUM_DISTANCE_METERS = small["maximum_distance_meters"]
+    s2.PROXIMITY_REQUIRE_SAME_OWNERSHIP = small["require_same_ownership"]
+    s2.PROXIMITY_REQUIRE_SAME_FOREST_TYPE = small["require_same_forest_type"]
+    s2.PROXIMITY_MAXIMUM_COMBINED_ACRES = small["maximum_combined_acres"]
+    s2.PROXIMITY_RETAIN_WHEN_NO_CANDIDATE = small["retain_when_no_candidate"]
+    s2.PROXIMITY_QA_CSV = os.path.join(
+        paths["qa"], "Proximity_Merge_Pairs.csv"
+    )
 
     s2.USE_OWNERSHIP_HARD_BOUNDARIES = (
         config.use_ownership_attributes and config.use_ownership_hard_boundaries
@@ -358,7 +368,10 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "databases_created": int(len(db_summary)),
         "run_folder": paths["run"],
         "stage_timings": timing_rows,
-        "qa_metrics": qa_metrics,
+        "qa_metrics": {
+            **qa_metrics,
+            "proximity_merge": dict(s2.PROXIMITY_MERGE_QA),
+        },
     }
     Path(paths["run"], "Run_Summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
