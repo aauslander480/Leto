@@ -55,6 +55,7 @@ CONFIG = {
         "source_nodata": -999999,
         "output_nodata": -9999,
         "coverage_check_nodata": -999999999,
+        "write_qa_provenance_rasters": True,
         "stored_value_multipliers": {
             "STDAGE": 1.0,
             "FORTYPCD": 1.0,
