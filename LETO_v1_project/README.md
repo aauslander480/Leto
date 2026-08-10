@@ -90,3 +90,24 @@ Stage 3 reads `ManagementUnits_Final` for its one-row-per-FVS-stand list and
 `ManagementSegments_Final` for donor provenance. Parent donor weights are
 multiplied by contributing segment-piece acreage, divided by final MU acreage,
 and repeated `PLT_CN` donors are consolidated before exact normalization.
+
+
+## Diagnostic-only imputation QA
+
+Stage 1 preserves the existing FIA-first, TreeMap-RAT-fallback, and independent
+nearest-cell fill order. It now writes
+`QA_STAGE1_Raster_Imputation_Summary.csv`,
+`QA_STAGE1_Landscape_Imputation_Summary.csv`, five optional
+`QA_<VARIABLE>_Source.tif` rasters, and
+`QA_Any_Nearest_Imputation.tif`. Nearest distances are measured from each
+filled cell to the exact donor indices already selected by the existing SciPy
+algorithm; calculating distance does not participate in donor selection.
+
+Stage 4 preserves the configured donor threshold and geographic
+`GenerateNearTable` selection. It now writes
+`QA_Imputation_Diagnostics.csv` with one row per imputed MU and
+`QA_Imputation_Summary.csv` with overall, failure-reason, distance-statistic,
+and distance-bin rows. A donor absent from all loaded FIA TREE files is reported
+as `MISSING_FIA_DONOR`; a present donor with no configured live-tree records is
+reported separately as `NO_LIVE_TREES`. Tree-data validity mirrors the
+existing usable-tree filter rather than introducing new exclusions.
