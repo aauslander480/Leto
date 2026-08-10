@@ -1468,4 +1468,6 @@ def run_stage(config):
         "basal_area_raster": basal_area_raster,
         "qmd_raster": qmd_raster,
         "tpa_raster": tpa_raster,
+        "qa_raster_imputation_summary": stage1_qa_summary_csv,
+        "qa_landscape_imputation_summary": stage1_qa_landscape_csv,
     }
