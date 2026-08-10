@@ -148,8 +148,14 @@ def build_imputation_summary(stands, diagnostics, distance_units):
         "DISTANCE_UNITS": distance_units,
     }]
     for reason in FAILURE_REASONS:
-        group = diagnostics[diagnostics["FAILURE_REASON"] == reason]
-        acres = float(pd.to_numeric(group.get("Acres"), errors="coerce").sum())
+        group = (
+            diagnostics[diagnostics["FAILURE_REASON"] == reason]
+            if not diagnostics.empty else pd.DataFrame()
+        )
+        acres = (
+            float(pd.to_numeric(group["Acres"], errors="coerce").sum())
+            if "Acres" in group else 0.0
+        )
         rows.append({
             "SECTION": "FAILURE_REASON", "FAILURE_REASON": reason,
             "MU_COUNT": len(group), "PCT_OF_ALL_MUS": _pct(len(group), total_mus),
