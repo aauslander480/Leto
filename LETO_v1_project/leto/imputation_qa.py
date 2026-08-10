@@ -22,9 +22,11 @@ def summarize_fia_donors(trees, species_lookup, live_status_code):
     frame["SPECIES_KEY"] = frame["SPCD_NUM"].astype("Int64").astype(str).str.zfill(3)
     frame["IS_LIVE"] = frame["STATUSCD_NUM"] == int(live_status_code)
     frame["IS_MAPPED"] = frame["SPECIES_KEY"].map(species_lookup).notna()
+    # Mirror the existing Stage 4 usable-tree filter exactly: diameter
+    # must be present and weighted TPA must be positive. CN and crown ratio
+    # are retained QA attributes but are not current exclusion criteria.
     frame["VALID_TREE_DATA"] = (
-        frame["CN"].notna()
-        & frame["DIA_NUM"].notna() & (frame["DIA_NUM"] > 0)
+        frame["DIA_NUM"].notna()
         & frame["TPA_NUM"].notna() & (frame["TPA_NUM"] > 0)
     )
     frame["IS_USABLE"] = frame["IS_LIVE"] & frame["IS_MAPPED"] & frame["VALID_TREE_DATA"]
