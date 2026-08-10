@@ -463,6 +463,26 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
             "Imputed MUs recoverable without the 5% filter: "
             f"{int(imputation_diagnostics['WOULD_HAVE_USABLE_TREES_WITHOUT_5PCT_FILTER'].sum()) if not imputation_diagnostics.empty else 0:,}"
         )
+        message("Failure reasons:")
+        failure_rows = imputation_summary.loc[
+            imputation_summary["SECTION"] == "FAILURE_REASON"
+        ]
+        for failure in failure_rows.itertuples(index=False):
+            message(
+                f"  {failure.FAILURE_REASON}: "
+                f"{int(failure.MU_COUNT):,} MUs / {float(failure.ACRES):,.2f} acres"
+            )
+        distance_rows = imputation_summary.loc[
+            imputation_summary["SECTION"] == "DISTANCE_STAT"
+        ].set_index("STATISTIC")
+        if not distance_rows.empty:
+            message(
+                "Nearest donor distance "
+                f"({distance_units}): median="
+                f"{distance_rows.loc['MEDIAN', 'DISTANCE']:,.2f}; "
+                f"p95={distance_rows.loc['P95', 'DISTANCE']:,.2f}; "
+                f"maximum={distance_rows.loc['MAX', 'DISTANCE']:,.2f}"
+            )
         final_stands = s4.build_final_stands(stands_df, weights_filtered, tree_list)
         _validate_final_inventory(stands_df, final_stands, tree_list)
         if (
