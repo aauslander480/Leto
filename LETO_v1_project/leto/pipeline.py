@@ -20,6 +20,10 @@ from . import stage3_crosswalk as s3
 from . import stage4_inventory as s4
 from . import stage5_database as s5
 from .spatial_management_units import finalize_management_outputs
+from .imputation_qa import (
+    build_imputation_diagnostics,
+    build_imputation_summary,
+)
 
 
 def _option(options: dict[str, Any], name: str, default: Any) -> Any:
@@ -386,6 +390,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         stands_df = _prepare_stands_dataframe(stands_df, config)
         minimum_weight = float(config.inventory["minimum_plot_weight"])
         weights_filtered = _filter_weights(weights_df, minimum_weight)
+        original_weights_for_qa = weights_df.copy()
         s4.fia_tree_files = list(config.fia_tree_files)
         s4.species_crosswalk_xls = config.species_crosswalk
         s4.species_crosswalk_sheet = config.species_crosswalk_sheet
@@ -406,8 +411,58 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         s4.qa_missing_species_csv = os.path.join(paths["qa"], "QA_Missing_FVS_Species.csv")
         s4.qa_missing_species_by_stand_csv = os.path.join(paths["qa"], "QA_Missing_FVS_Species_By_Stand.csv")
         species_lookup = s4.read_species_lookup()
-        tree_list, qa_metrics = s4.build_tree_list(weights_filtered, species_lookup)
+        all_donor_plots = set(
+            original_weights_for_qa["PLT_CN"].dropna().astype(str)
+        )
+        fia_trees_for_qa, donor_audit = s4.read_fia_trees_with_audit(
+            all_donor_plots, species_lookup
+        )
+        tree_list, qa_metrics = s4.build_tree_list(
+            weights_filtered, species_lookup, trees=fia_trees_for_qa
+        )
         tree_list, still_missing = s4.impute_missing_tree_lists(stands_df, tree_list)
+        imputation_diagnostics = build_imputation_diagnostics(
+            stands_df,
+            original_weights_for_qa,
+            weights_filtered,
+            donor_audit,
+            tree_list,
+        )
+        spatial_reference = arcpy.Describe(management_units).spatialReference
+        distance_units = (
+            "Meters"
+            if str(config.inventory["nearest_method"]).upper() == "GEODESIC"
+            else str(spatial_reference.linearUnitName or "Map units")
+        )
+        imputation_summary = build_imputation_summary(
+            stands_df, imputation_diagnostics, distance_units
+        )
+        imputation_diagnostics.to_csv(
+            Path(paths["qa"]) / "QA_Imputation_Diagnostics.csv", index=False
+        )
+        imputation_summary.to_csv(
+            Path(paths["qa"]) / "QA_Imputation_Summary.csv", index=False
+        )
+        overall_imputation = imputation_summary.loc[
+            imputation_summary["SECTION"] == "OVERALL"
+        ].iloc[0]
+        message("Nearest-neighbor imputation QA")
+        message("-" * 30)
+        message(
+            f"Total MUs: {int(overall_imputation['TOTAL_MUS']):,}; "
+            f"direct: {int(overall_imputation['DIRECT_MUS']):,}; "
+            f"imputed: {int(overall_imputation['IMPUTED_MUS']):,} "
+            f"({overall_imputation['PCT_MUS_IMPUTED']:.2f}%)"
+        )
+        message(
+            f"Total acres: {overall_imputation['TOTAL_ACRES']:,.2f}; "
+            f"imputed acres: {overall_imputation['IMPUTED_ACRES']:,.2f} "
+            f"({overall_imputation['PCT_ACRES_IMPUTED']:.2f}%)"
+        )
+        message(
+            "Imputed MUs recoverable without the 5% filter: "
+            f"{int(imputation_diagnostics['WOULD_HAVE_USABLE_TREES_WITHOUT_5PCT_FILTER'].sum()) if not imputation_diagnostics.empty else 0:,}"
+        )
         final_stands = s4.build_final_stands(stands_df, weights_filtered, tree_list)
         _validate_final_inventory(stands_df, final_stands, tree_list)
         if (
@@ -419,6 +474,11 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
                 "Proximity-merge run left FVS stands without trees."
             )
         qa_metrics["donor_weight_maximum_error"] = donor_weight_error
+        qa_metrics["imputation"] = {
+            "diagnostic_rows": int(len(imputation_diagnostics)),
+            "summary_rows": int(len(imputation_summary)),
+            "distance_units": distance_units,
+        }
         _write_dataframe_outputs(
             paths, stands_df, weights_filtered, final_stands, tree_list, still_missing
         )
