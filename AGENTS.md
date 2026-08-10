@@ -8,6 +8,8 @@ Codex and other coding agents must treat the verified Maine baseline as the sour
 
 ## Verified Baseline
 
+Recent development has occurred by testing runs in a 160,729 acre area of Maine.
+
 The current verified baseline produces:
 
 - Valid segmentation cells: 429,977
@@ -16,6 +18,8 @@ The current verified baseline produces:
 - Direct FVS stands: 19,244
 - Nearest-imputed stands: 418
 - Grouped FVS databases: 6
+
+These values are used to ensure core behavior of the model hasn't changed after features are added.
 
 When a task is not intended to change scientific behavior, these values are acceptance criteria.
 
