@@ -77,6 +77,10 @@ def build_imputation_diagnostics(
         counts = _sum_audit(retained_plots, audit)
         missing_plots = sorted(set(retained_plots) - set(audit))
         found_plots = sorted(set(retained_plots) & set(audit))
+        dropped_live = sum(
+            int(audit.get(plot, {}).get("LIVE_TREE_RECORDS", 0) > 0)
+            for plot in dropped["PLT_CN"].unique()
+        )
         dropped_usable = sum(
             int(audit.get(plot, {}).get("USABLE_TREE_RECORDS", 0) > 0)
             for plot in dropped["PLT_CN"].unique()
@@ -113,7 +117,7 @@ def build_imputation_diagnostics(
             "RETAINED_DONOR_COUNT": int(after["PLT_CN"].nunique()),
             "DROPPED_DONOR_COUNT": int(dropped["PLT_CN"].nunique()),
             "DROPPED_DONOR_WEIGHT_TOTAL": float(dropped["WEIGHT_ORIGINAL"].sum()),
-            "DROPPED_DONORS_WITH_FIA_LIVE_TREES": int(dropped_usable),
+            "DROPPED_DONORS_WITH_FIA_LIVE_TREES": int(dropped_live),
             "WOULD_HAVE_USABLE_TREES_WITHOUT_5PCT_FILTER": bool(dropped_usable > 0),
             "DONOR_STAND_ID": str(near["DONOR_STAND_ID"]),
             "NEAR_DIST": float(near["NEAR_DIST"]),
