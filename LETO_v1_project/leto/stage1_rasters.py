@@ -887,6 +887,13 @@ def write_stage1_imputation_qa(
             row[f"{label}_CELLS"] = count
             row[f"{label}_ACRES"] = count * cell_acres
             row[f"PCT_{label}"] = 100.0 * count / int(valid.sum())
+        source_total = int(sum(
+            int((provenance == code).sum()) for code in (1, 2, 3)
+        ))
+        if source_total != int(valid.sum()):
+            raise RuntimeError(
+                f"{variable} provenance counts do not equal valid TreeMap cells."
+            )
         if distances.size:
             row.update({
                 "MIN_DISTANCE": float(np.min(distances)),
