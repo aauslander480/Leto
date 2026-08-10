@@ -820,6 +820,132 @@ def write_lookup_raster(
 
 
 
+def write_stage1_imputation_qa(
+    qa_results, lower_left, cell_width, cell_height, spatial_reference
+):
+    """Write cell-source, distance, landscape, and donor-consistency QA."""
+    if spatial_reference is None or spatial_reference.type != "Projected":
+        raise RuntimeError("Stage 1 acreage and distance QA requires a projected raster.")
+    meters_per_unit = float(spatial_reference.metersPerUnit)
+    cell_acres = (
+        abs(cell_width * cell_height) * meters_per_unit * meters_per_unit
+        / 4046.8564224
+    )
+    units = str(spatial_reference.linearUnitName or "Map units")
+    variable_rows = []
+    provenance_stack, donor_stack = [], []
+    for variable, result in qa_results.items():
+        provenance = result["provenance"]
+        valid = result["source_valid"]
+        distances = result["nearest_distance"][provenance == 3]
+        row = {
+            "VARIABLE": variable,
+            "TOTAL_VALID_TREEMAP_CELLS": int(valid.sum()),
+            "DISTANCE_UNITS": units,
+        }
+        for code, label in (
+            (1, "FIA_DIRECT"), (2, "TREEMAP_RAT_FALLBACK"),
+            (3, "NEAREST_IMPUTED"),
+        ):
+            count = int((provenance == code).sum())
+            row[f"{label}_CELLS"] = count
+            row[f"{label}_ACRES"] = count * cell_acres
+            row[f"PCT_{label}"] = 100.0 * count / int(valid.sum())
+        if distances.size:
+            row.update({
+                "MIN_DISTANCE": float(np.min(distances)),
+                "MEDIAN_DISTANCE": float(np.median(distances)),
+                "MEAN_DISTANCE": float(np.mean(distances)),
+                "P90_DISTANCE": float(np.percentile(distances, 90)),
+                "P95_DISTANCE": float(np.percentile(distances, 95)),
+                "MAX_DISTANCE": float(np.max(distances)),
+            })
+        else:
+            for name in ("MIN", "MEDIAN", "MEAN", "P90", "P95", "MAX"):
+                row[f"{name}_DISTANCE"] = 0.0
+        for low, high, label in (
+            (0, 30, "0_30"), (30, 60, "30_60"), (60, 120, "60_120"),
+            (120, 300, "120_300"), (300, 600, "300_600"),
+            (600, 1000, "600_1000"), (1000, np.inf, "GT_1000"),
+        ):
+            count = int(((distances > low) & (distances <= high)).sum())
+            row[f"DIST_{label}_CELLS"] = count
+            row[f"DIST_{label}_ACRES"] = count * cell_acres
+        variable_rows.append(row)
+        provenance_stack.append(provenance)
+        donor_stack.append(result["donor_cell_id"])
+        if stage1_qa_provenance_rasters:
+            output = os.path.join(output_folder, f"QA_{variable}_Source.tif")
+            raster = arcpy.NumPyArrayToRaster(
+                provenance, lower_left, cell_width, cell_height, value_to_nodata=0
+            )
+            raster.save(output)
+            arcpy.management.DefineProjection(output, spatial_reference)
+
+    pd.DataFrame(variable_rows).to_csv(stage1_qa_summary_csv, index=False)
+    sources = np.stack(provenance_stack)
+    donors = np.stack(donor_stack)
+    valid = qa_results[next(iter(qa_results))]["source_valid"]
+    nearest_count = (sources == 3).sum(axis=0)
+    all_fia = valid & np.all(sources == 1, axis=0)
+    any_rat = valid & np.any(sources == 2, axis=0)
+    any_nearest = valid & (nearest_count > 0)
+    multi_nearest = nearest_count >= 2
+    same_donor = np.zeros(valid.shape, dtype=bool)
+    different_donor = np.zeros(valid.shape, dtype=bool)
+    for row, col in np.argwhere(multi_nearest):
+        ids = donors[:, row, col][sources[:, row, col] == 3]
+        if len(set(ids.tolist())) == 1:
+            same_donor[row, col] = True
+        else:
+            different_donor[row, col] = True
+    landscape_rows = []
+    total = int(valid.sum())
+    for metric, mask in (
+        ("TOTAL_VALID_TREEMAP_CELLS", valid),
+        ("CELLS_WITH_ALL_FIA_DIRECT_ATTRIBUTES", all_fia),
+        ("CELLS_WITH_ANY_TREEMAP_RAT_FALLBACK", any_rat),
+        ("CELLS_WITH_ANY_NEAREST_CELL_IMPUTATION", any_nearest),
+        ("MULTI_IMPUTED_SAME_DONOR_CELL", same_donor),
+        ("MULTI_IMPUTED_DIFFERENT_DONOR_CELLS", different_donor),
+    ):
+        count = int(mask.sum())
+        landscape_rows.append({
+            "METRIC": metric, "CELL_COUNT": count, "ACRES": count * cell_acres,
+            "PERCENT_OF_VALID_TREEMAP_ACRES": 100.0 * count / total,
+        })
+    for count_value in range(1, 6):
+        count = int((nearest_count == count_value).sum())
+        landscape_rows.append({
+            "METRIC": f"CELLS_WITH_{count_value}_NEAREST_IMPUTED_VARIABLES",
+            "CELL_COUNT": count, "ACRES": count * cell_acres,
+            "PERCENT_OF_VALID_TREEMAP_ACRES": 100.0 * count / total,
+        })
+    pd.DataFrame(landscape_rows).to_csv(stage1_qa_landscape_csv, index=False)
+    if stage1_qa_provenance_rasters:
+        output = os.path.join(output_folder, "QA_Any_Nearest_Imputation.tif")
+        raster = arcpy.NumPyArrayToRaster(
+            nearest_count.astype(np.uint8), lower_left, cell_width, cell_height,
+            value_to_nodata=0,
+        )
+        raster.save(output)
+        arcpy.management.DefineProjection(output, spatial_reference)
+    message("PRE-SEGMENTATION IMPUTATION QA")
+    message("-" * 50)
+    message(f"Valid TreeMap cells: {total:,}")
+    message(f"Valid TreeMap acres: {total * cell_acres:,.2f}")
+    message(
+        f"Cells with any nearest fill: {int(any_nearest.sum()):,} "
+        f"({100.0 * any_nearest.sum() / total:.2f}%)"
+    )
+    message(
+        "Cells using multiple donor cells for imputed attributes: "
+        f"{int(different_donor.sum()):,}"
+    )
+
+
+
+
 def configure(config):
     global treemap_raster, treemap_lookup_raster, fia_tree_files, fia_cond_files
     global output_folder, treemap_plt_field, clip_boundary, working_gdb
@@ -1088,8 +1214,10 @@ def run_stage(config):
     message("CREATING SEGMENTATION RASTERS")
     message("=" * 60)
 
+    qa_results = {}
+
     # Age in whole years.
-    write_lookup_raster(
+    qa_results["STDAGE"] = write_lookup_raster(
         source_array=source_array,
         value_records=value_records,
         field="STDAGE",
@@ -1104,7 +1232,7 @@ def run_stage(config):
     )
 
     # FIA forest type code.
-    write_lookup_raster(
+    qa_results["FORTYPCD"] = write_lookup_raster(
         source_array=source_array,
         value_records=value_records,
         field="FORTYPCD",
@@ -1121,7 +1249,7 @@ def run_stage(config):
     # BALIVE is stored in tenths of square feet per acre.
     #
     # Raster value 287 means 28.7 ft2/ac.
-    write_lookup_raster(
+    qa_results["BALIVE"] = write_lookup_raster(
         source_array=source_array,
         value_records=value_records,
         field="BALIVE",
@@ -1138,7 +1266,7 @@ def run_stage(config):
     # QMD is stored in tenths of an inch.
     #
     # Raster value 112 means 11.2 inches.
-    write_lookup_raster(
+    qa_results["QMD"] = write_lookup_raster(
         source_array=source_array,
         value_records=value_records,
         field="QMD",
@@ -1155,7 +1283,7 @@ def run_stage(config):
     # TPA is stored in tenths of a tree per acre.
     #
     # Raster value 1247 means 124.7 trees/ac.
-    write_lookup_raster(
+    qa_results["TPA"] = write_lookup_raster(
         source_array=source_array,
         value_records=value_records,
         field="TPA",
@@ -1169,6 +1297,9 @@ def run_stage(config):
         decimal_multiplier=stored_value_multipliers["TPA"],
     )
 
+    write_stage1_imputation_qa(
+        qa_results, lower_left, cell_width, cell_height, spatial_reference
+    )
 
     # ============================================================
     # VERIFY IDENTICAL RASTER COVERAGE
