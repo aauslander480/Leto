@@ -600,6 +600,17 @@ def read_raster_value_lookup(
                         record[f"_SOURCE_{output_field}"] = 2
                         rat_fallback_values += 1
 
+            record["_FIA_PLOT_FOUND"] = bool(
+                normalized_plot is not None and normalized_plot in fia_records
+            )
+            for provenance_field in fallback_candidates:
+                source_code = record.get(f"_SOURCE_{provenance_field}")
+                record[f"_FIA_ATTRIBUTE_AVAILABLE_{provenance_field}"] = (
+                    source_code == 1
+                )
+                record[f"_RAT_ATTRIBUTE_AVAILABLE_{provenance_field}"] = (
+                    source_code == 2
+                )
             record["PLT_CN"] = normalized_plot
             value_records[raster_value] = record
 
@@ -674,11 +685,32 @@ def write_lookup_raster(
 
     matched_values = 0
     provenance = np.zeros(source_array.shape, dtype=np.uint8)
+    reason_masks = {
+        "MISSING_FIA_PLT_CN": np.zeros(source_array.shape, dtype=bool),
+        "FIA_ATTRIBUTE_MISSING": np.zeros(source_array.shape, dtype=bool),
+        "NO_LIVE_TREES": np.zeros(source_array.shape, dtype=bool),
+        "TREEMAP_RAT_ATTRIBUTE_MISSING": np.zeros(source_array.shape, dtype=bool),
+    }
 
     for raster_value, record in value_records.items():
         field_value = record.get(field)
 
         if pd.isna(field_value):
+            cell_mask = source_array == raster_value
+            fia_found = bool(record.get("_FIA_PLOT_FOUND", False))
+            reason_masks["MISSING_FIA_PLT_CN"][cell_mask] = not fia_found
+            reason_masks["FIA_ATTRIBUTE_MISSING"][cell_mask] = (
+                fia_found
+                and not bool(record.get(f"_FIA_ATTRIBUTE_AVAILABLE_{field}", False))
+            )
+            reason_masks["TREEMAP_RAT_ATTRIBUTE_MISSING"][cell_mask] = (
+                not bool(record.get(f"_RAT_ATTRIBUTE_AVAILABLE_{field}", False))
+            )
+            if field in {"QMD", "TPA"} and fia_found:
+                live_records = record.get("LIVE_TREE_RECORDS")
+                reason_masks["NO_LIVE_TREES"][cell_mask] = (
+                    pd.isna(live_records) or float(live_records or 0) <= 0
+                )
             continue
 
         stored_value = (
@@ -815,6 +847,10 @@ def write_lookup_raster(
         "nearest_distance": distance_map_units,
         "donor_cell_id": donor_cell_id,
         "source_valid": source_valid,
+        "reason_counts": {
+            reason: int((mask & missing_mask).sum())
+            for reason, mask in reason_masks.items()
+        },
     }
 
 
@@ -871,6 +907,10 @@ def write_stage1_imputation_qa(
             count = int(((distances > low) & (distances <= high)).sum())
             row[f"DIST_{label}_CELLS"] = count
             row[f"DIST_{label}_ACRES"] = count * cell_acres
+        row.update({
+            f"{reason}_CELLS": count
+            for reason, count in result["reason_counts"].items()
+        })
         variable_rows.append(row)
         provenance_stack.append(provenance)
         donor_stack.append(result["donor_cell_id"])
