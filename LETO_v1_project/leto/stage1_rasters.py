@@ -28,6 +28,9 @@ live_tree_status_code = None
 output_nodata = None
 coverage_check_nodata = None
 stored_value_multipliers = {}
+stage1_qa_summary_csv = None
+stage1_qa_landscape_csv = None
+stage1_qa_provenance_rasters = True
 
 # ============================================================
 # HELPERS
@@ -577,6 +580,9 @@ def read_raster_value_lookup(
                     fia_records[normalized_plot]
                 )
                 fia_matches += 1
+                for source_field in fallback_candidates:
+                    if not pd.isna(record.get(source_field)):
+                        record[f"_SOURCE_{source_field}"] = 1
             elif normalized_plot is not None:
                 unmatched_plots.add(normalized_plot)
 
@@ -591,6 +597,7 @@ def read_raster_value_lookup(
 
                     if fallback_value is not None:
                         record[output_field] = fallback_value
+                        record[f"_SOURCE_{output_field}"] = 2
                         rat_fallback_values += 1
 
             record["PLT_CN"] = normalized_plot
@@ -666,6 +673,7 @@ def write_lookup_raster(
     )
 
     matched_values = 0
+    provenance = np.zeros(source_array.shape, dtype=np.uint8)
 
     for raster_value, record in value_records.items():
         field_value = record.get(field)
@@ -682,6 +690,7 @@ def write_lookup_raster(
 
         if np.any(cell_mask):
             working_array[cell_mask] = stored_value
+            provenance[cell_mask] = int(record.get(f"_SOURCE_{field}", 1))
             matched_values += 1
 
     assigned_before_fill = (
@@ -719,6 +728,7 @@ def write_lookup_raster(
         working_array[missing_mask] = (
             nearest_values[missing_mask]
         )
+        provenance[missing_mask] = 3
 
     missing_after_fill = int(
         np.count_nonzero(
@@ -781,7 +791,31 @@ def write_lookup_raster(
         spatial_reference,
     )
 
-    return matched_cells
+    distance_map_units = np.full(source_array.shape, np.nan, dtype=np.float64)
+    donor_cell_id = np.full(source_array.shape, -1, dtype=np.int64)
+    own_ids = np.arange(source_array.size, dtype=np.int64).reshape(source_array.shape)
+    donor_cell_id[assigned_before_fill] = own_ids[assigned_before_fill]
+    if missing_before_fill > 0:
+        rows, cols = np.indices(source_array.shape)
+        donor_rows = nearest_indices[0]
+        donor_cols = nearest_indices[1]
+        distances = np.sqrt(
+            np.square((rows - donor_rows) * abs(cell_height))
+            + np.square((cols - donor_cols) * abs(cell_width))
+        )
+        distance_map_units[missing_mask] = distances[missing_mask]
+        nearest_flat = np.ravel_multi_index(
+            (donor_rows, donor_cols), source_array.shape
+        )
+        donor_cell_id[missing_mask] = nearest_flat[missing_mask]
+
+    return {
+        "matched_cells": matched_cells,
+        "provenance": provenance,
+        "nearest_distance": distance_map_units,
+        "donor_cell_id": donor_cell_id,
+        "source_valid": source_valid,
+    }
 
 
 
@@ -793,6 +827,8 @@ def configure(config):
     global qmd_raster, tpa_raster, source_nodata
     global forest_condition_status_code, live_tree_status_code
     global output_nodata, coverage_check_nodata, stored_value_multipliers
+    global stage1_qa_summary_csv, stage1_qa_landscape_csv
+    global stage1_qa_provenance_rasters
 
     treemap_raster = config["treemap_raster"]
     treemap_lookup_raster = config.get("treemap_lookup_raster") or treemap_raster
@@ -808,6 +844,9 @@ def configure(config):
     output_nodata = config["output_nodata"]
     coverage_check_nodata = config["coverage_check_nodata"]
     stored_value_multipliers = dict(config["stored_value_multipliers"])
+    stage1_qa_provenance_rasters = bool(
+        config.get("write_qa_provenance_rasters", True)
+    )
 
     lookup_csv = os.path.join(output_folder, "TreeMap_PLT_CN_Segmentation_Lookup.csv")
     age_raster = os.path.join(output_folder, "TreeMap_STDAGE.tif")
@@ -815,6 +854,12 @@ def configure(config):
     basal_area_raster = os.path.join(output_folder, "TreeMap_BALIVE.tif")
     qmd_raster = os.path.join(output_folder, "TreeMap_QMD.tif")
     tpa_raster = os.path.join(output_folder, "TreeMap_TPA.tif")
+    stage1_qa_summary_csv = os.path.join(
+        output_folder, "QA_STAGE1_Raster_Imputation_Summary.csv"
+    )
+    stage1_qa_landscape_csv = os.path.join(
+        output_folder, "QA_STAGE1_Landscape_Imputation_Summary.csv"
+    )
 
     arcpy.env.overwriteOutput = True
     os.makedirs(output_folder, exist_ok=True)
