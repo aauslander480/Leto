@@ -35,6 +35,8 @@ import arcpy
 import numpy as np
 import pandas as pd
 
+from .imputation_qa import summarize_fia_donors
+
 
 # =============================================================================
 # USER INPUTS
@@ -604,14 +606,28 @@ def read_fia_trees(required_plt_cns):
 # BUILD WEIGHTED FVS TREE LIST
 # =============================================================================
 
-def build_tree_list(weights, species_lookup):
+def read_fia_trees_with_audit(required_plt_cns, species_lookup):
+    """Read all requested donor records and summarize each filtering stage."""
+    trees = read_fia_trees(required_plt_cns)
+    audit = summarize_fia_donors(
+        trees, species_lookup, LIVE_TREE_STATUS_CODE
+    )
+    return trees, audit
+
+
+def build_tree_list(weights, species_lookup, trees=None):
     required_plt_cns = set(
         weights["PLT_CN"].dropna().astype(str)
     )
 
-    trees = read_fia_trees(
-        required_plt_cns
-    )
+    if trees is None:
+        trees = read_fia_trees(
+            required_plt_cns
+        )
+    else:
+        trees = trees[
+            trees["PLT_CN"].astype(str).isin(required_plt_cns)
+        ].copy()
 
     joined = weights.merge(
         trees,
