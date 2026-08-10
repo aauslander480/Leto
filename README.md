@@ -56,7 +56,7 @@ Edit paths and region-specific settings in `LETO_v1_project/configs/maine_test.p
 then run the package entry script from an ArcGIS Pro Python environment:
 
 ```python
-%run r"D:\path\to\LETO_v1_project\run_leto.py" r"D:\path\to\LETO_v1_project\configs\maine_test.py"
+%run D:\path\to\LETO_v1_project\run_leto.py D:\path\to\LETO_v1_project\configs\maine_test.py
 ```
 
 Large input datasets are not distributed with this repository. Users must
