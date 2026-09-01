@@ -240,6 +240,15 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.riparian_split_stands = s2.management_segments_final
     s2.riparian_buffer = os.path.join(config.working_gdb, "Riparian_Buffer")
     s2.ownership_aligned_raster = os.path.join(paths["segmentation"], "Ownership_Classes_Aligned.tif")
+    s2.ownership_cleaned_raster = os.path.join(
+        paths["segmentation"], "Ownership_NonForest_Reassigned.tif"
+    )
+    s2.ownership_reassignment_qa_raster = os.path.join(
+        paths["qa"], "Ownership_NonForest_Reassignment_QA.tif"
+    )
+    s2.ownership_reassignment_qa_csv = os.path.join(
+        paths["qa"], "QA_Ownership_NonForest_Reassignment.csv"
+    )
     s2.wetland_footprint = os.path.join(config.working_gdb, "NWI_Wetlands_Dissolved")
     s2.ownership_projected_temp = os.path.join(config.working_gdb, "_ownership_projected")
 
@@ -270,6 +279,7 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
         paths["qa"], "Proximity_Merge_Pairs.csv"
     )
     s2.PROXIMITY_MERGE_QA = {}
+    s2.OWNERSHIP_NONFOREST_QA = {}
 
     s2.USE_OWNERSHIP_HARD_BOUNDARIES = (
         config.use_ownership_attributes and config.use_ownership_hard_boundaries
@@ -281,6 +291,12 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.UNKNOWN_OWNERSHIP_CODE = ownership["unknown_code"]
     s2.UNKNOWN_OWNERSHIP_TYPE = ownership["unknown_type"]
     s2.NONFOREST_AND_WATER_CODES = tuple(ownership["nonforest_and_water_codes"])
+    s2.CLEAN_TREEMAP_NONFOREST = bool(ownership["clean_treemap_nonforest"])
+    s2.NONFOREST_OWNERSHIP_CODE = ownership["nonforest_code"]
+    excluded_codes = set(ownership["reassignment_excluded_codes"])
+    s2.OWNERSHIP_REASSIGNMENT_CODES = tuple(
+        sorted(set(s2.OWNERSHIP_TYPES) - excluded_codes)
+    )
 
     s2.CREATE_RIPARIAN_STANDS = rip["create_riparian_stands"]
     s2.CLASSIFY_WETLANDS = rip["classify_wetlands"]
@@ -532,6 +548,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "qa_metrics": {
             **qa_metrics,
             "proximity_merge": dict(s2.PROXIMITY_MERGE_QA),
+            "ownership_nonforest_reassignment": dict(s2.OWNERSHIP_NONFOREST_QA),
             "proximity_chain_qa": stage2_mu_qa,
         },
     }
@@ -580,3 +597,4 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "database_summary": db_summary,
         "summary": summary,
     }
+

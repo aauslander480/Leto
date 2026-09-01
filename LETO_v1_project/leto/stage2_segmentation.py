@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage
 
+from .ownership_cleaning import reassign_nonforest_patches
 from .small_stands import plan_proximity_merges
 
 
@@ -79,6 +80,18 @@ riparian_split_stands = management_units_final
 ownership_aligned_raster = os.path.join(
     output_folder,
     "Ownership_Classes_Aligned.tif",
+)
+ownership_cleaned_raster = os.path.join(
+    output_folder,
+    "Ownership_NonForest_Reassigned.tif",
+)
+ownership_reassignment_qa_raster = os.path.join(
+    output_folder,
+    "Ownership_NonForest_Reassignment_QA.tif",
+)
+ownership_reassignment_qa_csv = os.path.join(
+    output_folder,
+    "QA_Ownership_NonForest_Reassignment.csv",
 )
 wetland_footprint = os.path.join(output_gdb, "NWI_Wetlands_Dissolved")
 
@@ -173,6 +186,10 @@ UNKNOWN_OWNERSHIP_TYPE = None
 # Unknown prevents them from creating extra hard boundaries.
 COLLAPSE_NONFOREST_AND_WATER = None
 NONFOREST_AND_WATER_CODES = ()
+CLEAN_TREEMAP_NONFOREST = None
+NONFOREST_OWNERSHIP_CODE = None
+OWNERSHIP_REASSIGNMENT_CODES = ()
+OWNERSHIP_NONFOREST_QA = {}
 
 ownership_projected_temp = os.path.join(
     output_gdb,
@@ -1609,23 +1626,115 @@ def prepare_ownership_raster(reference_raster):
             f"{unexpected_codes}"
         )
 
-    if COLLAPSE_NONFOREST_AND_WATER:
-        collapse_mask = np.isin(
-            ownership,
-            NONFOREST_AND_WATER_CODES,
-        )
-        collapsed_cells = int(collapse_mask.sum())
-        ownership[collapse_mask] = UNKNOWN_OWNERSHIP_CODE
-        message(
-            "NonForest and Water cells converted to Unknown: "
-            f"{collapsed_cells:,}"
-        )
-
     _delete_if_exists(ownership_projected_temp)
 
     message(
         "Aligned ownership raster written:\n"
         f"{ownership_aligned_raster}"
+    )
+    return ownership
+
+
+def _save_array_on_reference(array, output_path, reference_raster):
+    """Write an array with the reference raster's grid and spatial reference."""
+    reference = arcpy.Raster(reference_raster)
+    _delete_if_exists(output_path)
+    raster = arcpy.NumPyArrayToRaster(
+        array,
+        arcpy.Point(reference.extent.XMin, reference.extent.YMin),
+        float(reference.meanCellWidth),
+        float(reference.meanCellHeight),
+    )
+    raster.save(output_path)
+    arcpy.management.DefineProjection(
+        output_path,
+        arcpy.Describe(reference_raster).spatialReference,
+    )
+    validate_alignment(reference_raster, [output_path])
+
+
+def clean_ownership_for_segmentation(
+    ownership,
+    valid_mask,
+    reference_raster,
+    cell_acres,
+):
+    """Clean TreeMap-covered NonForest patches and emit raster/CSV QA."""
+    global OWNERSHIP_NONFOREST_QA
+
+    if not USE_OWNERSHIP_HARD_BOUNDARIES or not CLEAN_TREEMAP_NONFOREST:
+        OWNERSHIP_NONFOREST_QA = {"enabled": False}
+        return ownership
+
+    result = reassign_nonforest_patches(
+        ownership,
+        valid_mask,
+        nonforest_code=NONFOREST_OWNERSHIP_CODE,
+        eligible_codes=OWNERSHIP_REASSIGNMENT_CODES,
+        cell_area_acres=cell_acres,
+    )
+    qa = {"enabled": True, **result.qa}
+    qa["destination_names"] = {
+        str(code): OWNERSHIP_TYPES[code]
+        for code in result.qa["cells_by_destination"]
+    }
+    OWNERSHIP_NONFOREST_QA = qa
+
+    _save_array_on_reference(
+        result.ownership.astype(np.int16),
+        ownership_cleaned_raster,
+        reference_raster,
+    )
+    _save_array_on_reference(
+        result.changed_mask.astype(np.uint8),
+        ownership_reassignment_qa_raster,
+        reference_raster,
+    )
+
+    rows = [
+        {"METRIC": key, "VALUE": value, "OWNERSHIP_CODE": None, "OWNERSHIP_TYPE": None}
+        for key, value in result.qa.items()
+        if key not in {"cells_by_destination", "acres_by_destination"}
+    ]
+    for code, cells in result.qa["cells_by_destination"].items():
+        rows.append({
+            "METRIC": "destination",
+            "VALUE": cells,
+            "ACRES": result.qa["acres_by_destination"][code],
+            "OWNERSHIP_CODE": code,
+            "OWNERSHIP_TYPE": OWNERSHIP_TYPES[code],
+        })
+    pd.DataFrame(rows).to_csv(ownership_reassignment_qa_csv, index=False)
+
+    message("OWNERSHIP NONFOREST REASSIGNMENT")
+    message("-" * 40)
+    message(f"TreeMap cells classified NonForest: {qa['initial_nonforest_cells']:,}")
+    message(f"Affected acreage: {qa['initial_nonforest_acres']:,.2f}")
+    message(f"Connected NonForest patches: {qa['patches_evaluated']:,}")
+    message(f"Patches reassigned: {qa['patches_reassigned']:,}")
+    message(f"Cells reassigned: {qa['cells_reassigned']:,}")
+    message(f"Acres reassigned: {qa['acres_reassigned']:,.2f}")
+    message(f"Unresolved patches: {qa['unresolved_patches']:,}")
+    message("Reassigned to:")
+    for code, cells in qa["cells_by_destination"].items():
+        message(
+            f"  {OWNERSHIP_TYPES[code]}: {cells:,} cells / "
+            f"{qa['acres_by_destination'][code]:,.2f} acres"
+        )
+    return result.ownership
+
+
+def collapse_nonownership_classes(ownership):
+    """Apply the existing NonForest/Water-to-Unknown segmentation behavior."""
+    if not COLLAPSE_NONFOREST_AND_WATER:
+        return ownership
+    ownership = ownership.copy()
+    collapse_mask = np.isin(ownership, NONFOREST_AND_WATER_CODES)
+    collapsed_cells = int(collapse_mask.sum())
+    ownership[collapse_mask] = UNKNOWN_OWNERSHIP_CODE
+    message(
+        "Remaining NonForest and Water cells converted to Unknown: "
+        f"{collapsed_cells:,}"
     )
     return ownership
 
@@ -2016,6 +2125,13 @@ def main():
     if valid_cells == 0:
         raise RuntimeError("No cells contained complete data across all five rasters.")
     message(f"Cells with complete segmentation data: {valid_cells:,}")
+    ownership = clean_ownership_for_segmentation(
+        ownership,
+        valid_mask,
+        age_raster,
+        cell_acres,
+    )
+    ownership = collapse_nonownership_classes(ownership)
     report_ownership_cells(ownership, valid_mask)
 
     message("=" * 60)
@@ -2241,3 +2357,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -92,6 +92,24 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("collapse_nonforest_and_water", True)
     raw.setdefault("raster_model", {})
     raw.setdefault("ownership", {})
+    ownership_defaults = {
+        "clean_treemap_nonforest": False,
+        "nonforest_code": next(
+            (
+                int(code)
+                for code, name in raw["ownership"].get("types", {}).items()
+                if str(name).casefold() == "nonforest"
+            ),
+            None,
+        ),
+        "reassignment_excluded_codes": tuple(
+            raw["ownership"].get("nonforest_and_water_codes", ())
+        ) + (raw["ownership"].get("unknown_code"),),
+    }
+    raw["ownership"] = {
+        **ownership_defaults,
+        **raw["ownership"],
+    }
     raw.setdefault("segmentation", {})
     small_stand_defaults = {
         "remaining_small_stand_action": raw["segmentation"].get(
@@ -123,6 +141,45 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
+
+    ownership_types = {
+        int(code): str(name)
+        for code, name in raw["ownership"].get("types", {}).items()
+    }
+    raw["ownership"]["types"] = ownership_types
+    nonforest_code = raw["ownership"].get("nonforest_code")
+    if raw["ownership"]["clean_treemap_nonforest"]:
+        if nonforest_code is None or int(nonforest_code) not in ownership_types:
+            raise ValueError(
+                "ownership.nonforest_code must identify a configured ownership type "
+                "when clean_treemap_nonforest is enabled."
+            )
+        nonforest_code = int(nonforest_code)
+        if ownership_types[nonforest_code].casefold() != "nonforest":
+            raise ValueError(
+                "ownership.nonforest_code must map to the existing NonForest type."
+            )
+        raw["ownership"]["nonforest_code"] = nonforest_code
+    excluded = tuple(
+        sorted(
+            {
+                int(code)
+                for code in raw["ownership"]["reassignment_excluded_codes"]
+                if code is not None
+            }
+        )
+    )
+    unknown_code = int(raw["ownership"]["unknown_code"])
+    required_exclusions = {
+        unknown_code,
+        *(int(code) for code in raw["ownership"]["nonforest_and_water_codes"]),
+    }
+    if not required_exclusions.issubset(excluded):
+        raise ValueError(
+            "ownership.reassignment_excluded_codes must include Unknown, "
+            "NonForest, and Water codes."
+        )
+    raw["ownership"]["reassignment_excluded_codes"] = excluded
 
     action = str(
         raw["small_stands"]["remaining_small_stand_action"]
@@ -172,3 +229,4 @@ def load_config(path: str | Path) -> RunConfig:
     raw["proximity_chain_qa"]["acreage_tolerance_acres"] = acreage_tolerance
 
     return RunConfig(**raw)
+

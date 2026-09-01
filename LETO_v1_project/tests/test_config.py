@@ -11,6 +11,9 @@ def test_example_config_loads():
     assert config.segmentation["remaining_small_stand_action"] == "force_merge"
     assert config.raster_model["stored_value_multipliers"]["BALIVE"] == 10.0
     assert config.ownership["nonforest_and_water_codes"] == (1, 2)
+    assert config.ownership["clean_treemap_nonforest"] is True
+    assert config.ownership["nonforest_code"] == 1
+    assert config.ownership["reassignment_excluded_codes"] == (0, 1, 2)
     assert config.riparian["flowline_buffer_rules"][46006] == (
         "Perennial Stream",
         45.0,
@@ -20,3 +23,4 @@ def test_example_config_loads():
     assert config.small_stands["remaining_small_stand_action"] == "force_merge"
     assert config.small_stands["maximum_distance_meters"] == 60.0
     assert config.small_stands["maximum_combined_acres"] == 300.0
+

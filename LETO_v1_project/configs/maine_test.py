@@ -80,6 +80,13 @@ CONFIG = {
         "unknown_code": 0,
         "unknown_type": "Unknown",
         "nonforest_and_water_codes": (1, 2),
+        # Correct only NonForest patches inside valid TreeMap forest coverage.
+        # Unknown, NonForest, and Water are ineligible destinations. Patches
+        # without an eligible edge neighbor remain NonForest until the existing
+        # collapse-to-Unknown step below.
+        "clean_treemap_nonforest": True,
+        "nonforest_code": 1,
+        "reassignment_excluded_codes": (0, 1, 2),
     },
 
     "segmentation": {
@@ -200,3 +207,4 @@ CONFIG = {
         "nonstockable_plots": 0,
     },
 }
+

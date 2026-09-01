@@ -58,6 +58,23 @@ matching ownership and dominant forest type, enforce the configured maximum
 combined acreage, and use a 60-meter search distance. Donor weights for grouped
 segments are combined by contributing acreage.
 
+## TreeMap-covered NonForest ownership cleanup
+
+Regional configurations can enable
+`ownership["clean_treemap_nonforest"]` after identifying the existing
+`nonforest_code` and destination exclusions. Stage 2 aligns the source
+ownership raster to the TreeMap grid, labels TreeMap-covered NonForest patches
+with 8-neighbor connectivity, and assigns each whole patch to the eligible
+ownership class sharing the most cardinal cell edges. Exact ties use the lowest
+configured ownership code. Patches with no eligible edge neighbor remain
+NonForest and then follow the existing `collapse_nonforest_and_water` behavior.
+
+The step writes `Ownership_NonForest_Reassigned.tif`, a binary
+`Ownership_NonForest_Reassignment_QA.tif`, and
+`QA_Ownership_NonForest_Reassignment.csv`. Counts and acreages also appear in
+the console log and `Run_Summary.json`; acreage uses the aligned raster's actual
+cell dimensions.
+
 
 ## Proximity-chain QA and final management-unit identity
 
@@ -111,3 +128,4 @@ and distance-bin rows. A donor absent from all loaded FIA TREE files is reported
 as `MISSING_FIA_DONOR`; a present donor with no configured live-tree records is
 reported separately as `NO_LIVE_TREES`. Tree-data validity mirrors the
 existing usable-tree filter rather than introducing new exclusions.
+
