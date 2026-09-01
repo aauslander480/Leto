@@ -221,6 +221,7 @@ def _aggregate_attributes(feature_class, compatibility, qa):
         record = {
             "MU_ID": int(mu_id),
             "BIO_MU_ID": int(group["BIO_MU_ID"].iloc[0]),
+            "ParentSEG_ID": int(group["SEG_ID"].astype(int).min()),
             "Acres": float(acres.sum()),
             "SEG_IDS": ",".join(str(v) for v in sorted(group["SEG_ID"].astype(int).unique())),
         }
@@ -250,7 +251,8 @@ def _write_unit_attributes(unit_output, aggregate, component_output, compatibili
     source_types = {field.name: field for field in arcpy.ListFields(component_output)}
     text_fields = {"SEG_IDS": 4000}
     fields_to_add = {
-        "BIO_MU_ID": ("LONG", None), "Acres": ("DOUBLE", None),
+        "BIO_MU_ID": ("LONG", None), "ParentSEG_ID": ("LONG", None),
+        "Acres": ("DOUBLE", None),
         **{name: (kind, None) for name, kind in QA_FIELD_TYPES.items()},
         **{name: ("TEXT", length) for name, length in text_fields.items()},
     }
@@ -295,3 +297,4 @@ def _add_field_type(field):
 def _delete(path):
     if arcpy.Exists(path):
         arcpy.management.Delete(path)
+

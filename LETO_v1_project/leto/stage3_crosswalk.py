@@ -477,7 +477,9 @@ def build_weights_table(
 def read_stand_polygons(polygon_path, return_components=False):
     """Read polygon components and aggregate one FVS stand per final MU_ID."""
     parent_field = find_field(
-        polygon_path, ["SEG_ID", "GRIDCODE", "VALUE", "MU_ID"], True
+        polygon_path,
+        ["ParentSEG_ID", "SEG_ID", "GRIDCODE", "VALUE", "MU_ID"],
+        True,
     )
     mu_field = find_field(polygon_path, ["MU_ID", "FINAL_ID"], True)
     excluded_types = {"OID", "Geometry", "Blob", "Raster", "GUID", "GlobalID"}
@@ -633,14 +635,35 @@ def expand_parent_weights_to_management_units(
         donor = donor.drop(
             columns=["FVS_Stand_ID", "STAND_ID"], errors="ignore"
         )
+        # Use component provenance rather than a dissolved unit's identifier.
+        # Riparian splitting can create MU_ID values greater than the source
+        # raster SEG_ID range, so MU_ID must never be used as a donor key.
+        component_mapping = components[["MU_ID", "SEG_ID"]].drop_duplicates()
+        duplicate_mu = component_mapping["MU_ID"].duplicated(keep=False)
+        if duplicate_mu.any():
+            raise RuntimeError(
+                "Single-segment management units reference multiple parent SEG_ID values."
+            )
+        component_mapping = component_mapping.rename(
+            columns={"SEG_ID": "ParentSEG_ID"}
+        )
         mapping_columns = [
-            "SEG_ID", "MU_ID", "ParentSEG_ID", "STAND_ID",
-            "FVS_Stand_ID", "Acres",
+            "SEG_ID", "MU_ID", "STAND_ID", "FVS_Stand_ID", "Acres",
         ]
         mapping_columns = [
             column for column in mapping_columns if column in stands.columns
         ]
-        expanded = stands[mapping_columns].merge(
+        stand_mapping = stands[mapping_columns].merge(
+            component_mapping,
+            on="MU_ID",
+            how="left",
+            validate="one_to_one",
+        )
+        if stand_mapping["ParentSEG_ID"].isna().any():
+            raise RuntimeError(
+                "Final management units are missing component SEG_ID provenance."
+            )
+        expanded = stand_mapping.merge(
             donor,
             on="ParentSEG_ID",
             how="left",
@@ -836,3 +859,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
