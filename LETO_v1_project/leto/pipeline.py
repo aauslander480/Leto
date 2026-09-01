@@ -19,6 +19,11 @@ from . import stage2_segmentation as s2
 from . import stage3_crosswalk as s3
 from . import stage4_inventory as s4
 from . import stage5_database as s5
+from .spatial_management_units import finalize_management_outputs
+from .imputation_qa import (
+    build_imputation_diagnostics,
+    build_imputation_summary,
+)
 
 
 def _option(options: dict[str, Any], name: str, default: Any) -> Any:
@@ -58,7 +63,8 @@ def _ensure_management_units(segment_polygons: str, output_fc: str) -> str:
         for row in cursor:
             oid = int(row[0])
             seg_id = int(row[1])
-            row[2] = oid
+            if row[2] is None:
+                row[2] = oid
             row[3] = oid
             row[4] = f"SEG_{seg_id}"
             row[5] = float(row[6].getArea("GEODESIC", "ACRES"))
@@ -114,6 +120,27 @@ def _prepare_stands_dataframe(stands: pd.DataFrame, config: RunConfig) -> pd.Dat
     stands["VARIANT"] = config.fvs_variant
     stands["STATE"] = config.fvs_state
     return stands
+
+
+def _validate_final_inventory(stands, final_stands, trees):
+    """Enforce one stand row per MU and complete tree-list coverage."""
+    for label, frame in (("stand list", stands), ("final stand list", final_stands)):
+        if frame["STAND_ID"].astype(str).duplicated().any():
+            raise RuntimeError(f"{label} contains duplicate STAND_ID values.")
+    expected = set(final_stands["STAND_ID"].astype(str))
+    tree_ids = set(trees["STAND_ID"].astype(str))
+    missing = sorted(expected - tree_ids)
+    unknown = sorted(tree_ids - expected)
+    if missing:
+        raise RuntimeError(
+            f"Final FVS stands without tree records: {missing[:20]}"
+        )
+    if unknown:
+        raise RuntimeError(
+            f"Tree records reference unknown final stands: {unknown[:20]}"
+        )
+    if len(final_stands) != len(expected):
+        raise RuntimeError("Final FVS stand count differs from unique STAND_ID count.")
 
 
 def _write_dataframe_outputs(
@@ -195,6 +222,7 @@ def _build_databases(
 
 def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[str, str]) -> None:
     seg = config.segmentation
+    small = config.small_stands
     rip = config.riparian
 
     s2.age_raster = rasters["age_raster"]
@@ -207,8 +235,9 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.segment_raster = os.path.join(paths["segmentation"], "TreeMap_Segments_Initial.tif")
     s2.segment_polygons = os.path.join(config.working_gdb, "TreeMap_Segments_Initial")
     s2.segment_summary_csv = os.path.join(paths["segmentation"], "TreeMap_Segment_Summary.csv")
+    s2.management_segments_final = os.path.join(config.working_gdb, "ManagementSegments_Final")
     s2.management_units_final = os.path.join(config.working_gdb, "ManagementUnits_Final")
-    s2.riparian_split_stands = s2.management_units_final
+    s2.riparian_split_stands = s2.management_segments_final
     s2.riparian_buffer = os.path.join(config.working_gdb, "Riparian_Buffer")
     s2.ownership_aligned_raster = os.path.join(paths["segmentation"], "Ownership_Classes_Aligned.tif")
     s2.wetland_footprint = os.path.join(config.working_gdb, "NWI_Wetlands_Dissolved")
@@ -231,7 +260,16 @@ def _configure_stage2(config: RunConfig, paths: dict[str, str], rasters: dict[st
     s2.SIMILAR_MERGE_REQUIRE_SAME_FORTYPCD = seg["similar_merge_require_same_fortypcd"]
     s2.SIMILAR_MERGE_MIN_SHARED_EDGES = seg["similar_merge_min_shared_edges"]
     s2.SIMILAR_MERGE_MAX_PASSES = seg["similar_merge_max_passes"]
-    s2.REMAINING_SMALL_STAND_ACTION = seg["remaining_small_stand_action"]
+    s2.REMAINING_SMALL_STAND_ACTION = small["remaining_small_stand_action"]
+    s2.PROXIMITY_MAXIMUM_DISTANCE_METERS = small["maximum_distance_meters"]
+    s2.PROXIMITY_REQUIRE_SAME_OWNERSHIP = small["require_same_ownership"]
+    s2.PROXIMITY_REQUIRE_SAME_FOREST_TYPE = small["require_same_forest_type"]
+    s2.PROXIMITY_MAXIMUM_COMBINED_ACRES = small["maximum_combined_acres"]
+    s2.PROXIMITY_RETAIN_WHEN_NO_CANDIDATE = small["retain_when_no_candidate"]
+    s2.PROXIMITY_QA_CSV = os.path.join(
+        paths["qa"], "Proximity_Merge_Pairs.csv"
+    )
+    s2.PROXIMITY_MERGE_QA = {}
 
     s2.USE_OWNERSHIP_HARD_BOUNDARIES = (
         config.use_ownership_attributes and config.use_ownership_hard_boundaries
@@ -285,10 +323,34 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         _configure_stage2(config, paths, raster_outputs)
         s2.main()
         create_riparian = config.riparian["create_riparian_stands"]
-        management_units = (
-            s2.management_units_final
-            if create_riparian
-            else _ensure_management_units(s2.segment_polygons, s2.management_units_final)
+        if create_riparian:
+            component_source = s2.management_segments_final
+        else:
+            component_source = _ensure_management_units(
+                s2.segment_polygons, s2.management_segments_final
+            )
+        chain = config.proximity_chain_qa
+        stage2_mu_qa = finalize_management_outputs(
+            component_source,
+            s2.management_segments_final,
+            s2.management_units_final,
+            proximity_enabled=(
+                config.small_stands["remaining_small_stand_action"]
+                == "proximity_merge"
+            ),
+            maximum_distance_meters=config.small_stands["maximum_distance_meters"],
+            warning_chain_ratio=chain["warning_chain_ratio"],
+            qa_folder=paths["qa"],
+            write_component_pair_csv=chain["write_component_pair_csv"],
+            acreage_tolerance_acres=chain["acreage_tolerance_acres"],
+        )
+        management_segments = s2.management_segments_final
+        management_units = s2.management_units_final
+        message(
+            "Stage 2 final outputs: "
+            f"{stage2_mu_qa['component_polygons']:,} component polygons; "
+            f"{stage2_mu_qa['final_management_units']:,} dissolved units; "
+            f"acreage discrepancy={stage2_mu_qa['acreage_discrepancy']:.9f}"
         )
 
     with timed_stage("Stage 3 - Build donor crosswalk", timings):
@@ -302,15 +364,33 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         s3.inventory_year = config.inventory_year
         s3.variant = config.fvs_variant
         s3.state = config.fvs_state
-        stands_df = s3.read_stand_polygons(management_units)
-        s3.validate_segment_ids(parent_weights, stands_df)
-        weights_df = s3.expand_parent_weights_to_management_units(parent_weights, stands_df)
+        stands_df = s3.read_management_units(management_units)
+        components_df = s3.read_management_segments(management_segments)
+        s3.validate_segment_ids(parent_weights, stands_df, components_df)
+        weights_df = s3.expand_parent_weights_to_management_units(
+            parent_weights, stands_df, components_df
+        )
+        weight_key = "MU_ID" if "MU_ID" in weights_df.columns else "SEG_ID"
+        donor_weight_error = float(
+            (
+                weights_df.groupby(weight_key)["WEIGHT"].sum() - 1.0
+            ).abs().max()
+        )
+        if donor_weight_error > 1e-9:
+            raise RuntimeError(
+                "Final management-unit donor weights do not sum to 1."
+            )
+        message(
+            "Maximum final donor-weight sum error: "
+            f"{donor_weight_error:.12f}"
+        )
         weights_df.to_csv(Path(paths["crosswalk"]) / "Segment_PLT_CN_Weights.csv", index=False)
 
     with timed_stage("Stage 4 - Build weighted FVS inventory", timings):
         stands_df = _prepare_stands_dataframe(stands_df, config)
         minimum_weight = float(config.inventory["minimum_plot_weight"])
         weights_filtered = _filter_weights(weights_df, minimum_weight)
+        original_weights_for_qa = weights_df.copy()
         s4.fia_tree_files = list(config.fia_tree_files)
         s4.species_crosswalk_xls = config.species_crosswalk
         s4.species_crosswalk_sheet = config.species_crosswalk_sheet
@@ -331,15 +411,106 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         s4.qa_missing_species_csv = os.path.join(paths["qa"], "QA_Missing_FVS_Species.csv")
         s4.qa_missing_species_by_stand_csv = os.path.join(paths["qa"], "QA_Missing_FVS_Species_By_Stand.csv")
         species_lookup = s4.read_species_lookup()
-        tree_list, qa_metrics = s4.build_tree_list(weights_filtered, species_lookup)
+        all_donor_plots = set(
+            original_weights_for_qa["PLT_CN"].dropna().astype(str)
+        )
+        fia_trees_for_qa, donor_audit = s4.read_fia_trees_with_audit(
+            all_donor_plots, species_lookup
+        )
+        tree_list, qa_metrics = s4.build_tree_list(
+            weights_filtered, species_lookup, trees=fia_trees_for_qa
+        )
         tree_list, still_missing = s4.impute_missing_tree_lists(stands_df, tree_list)
+        imputation_diagnostics = build_imputation_diagnostics(
+            stands_df,
+            original_weights_for_qa,
+            weights_filtered,
+            donor_audit,
+            tree_list,
+        )
+        spatial_reference = arcpy.Describe(management_units).spatialReference
+        distance_units = (
+            "Meters"
+            if str(config.inventory["nearest_method"]).upper() == "GEODESIC"
+            else str(spatial_reference.linearUnitName or "Map units")
+        )
+        imputation_summary = build_imputation_summary(
+            stands_df, imputation_diagnostics, distance_units
+        )
+        imputation_diagnostics.to_csv(
+            Path(paths["qa"]) / "QA_Imputation_Diagnostics.csv", index=False
+        )
+        imputation_summary.to_csv(
+            Path(paths["qa"]) / "QA_Imputation_Summary.csv", index=False
+        )
+        overall_imputation = imputation_summary.loc[
+            imputation_summary["SECTION"] == "OVERALL"
+        ].iloc[0]
+        message("Nearest-neighbor imputation QA")
+        message("-" * 30)
+        message(
+            f"Total MUs: {int(overall_imputation['TOTAL_MUS']):,}; "
+            f"direct: {int(overall_imputation['DIRECT_MUS']):,}; "
+            f"imputed: {int(overall_imputation['IMPUTED_MUS']):,} "
+            f"({overall_imputation['PCT_MUS_IMPUTED']:.2f}%)"
+        )
+        message(
+            f"Total acres: {overall_imputation['TOTAL_ACRES']:,.2f}; "
+            f"imputed acres: {overall_imputation['IMPUTED_ACRES']:,.2f} "
+            f"({overall_imputation['PCT_ACRES_IMPUTED']:.2f}%)"
+        )
+        message(
+            "Imputed MUs recoverable without the 5% filter: "
+            f"{int(imputation_diagnostics['WOULD_HAVE_USABLE_TREES_WITHOUT_5PCT_FILTER'].sum()) if not imputation_diagnostics.empty else 0:,}"
+        )
+        message("Failure reasons:")
+        failure_rows = imputation_summary.loc[
+            imputation_summary["SECTION"] == "FAILURE_REASON"
+        ]
+        for failure in failure_rows.itertuples(index=False):
+            message(
+                f"  {failure.FAILURE_REASON}: "
+                f"{int(failure.MU_COUNT):,} MUs / {float(failure.ACRES):,.2f} acres"
+            )
+        distance_rows = imputation_summary.loc[
+            imputation_summary["SECTION"] == "DISTANCE_STAT"
+        ].set_index("STATISTIC")
+        if not distance_rows.empty:
+            message(
+                "Nearest donor distance "
+                f"({distance_units}): median="
+                f"{distance_rows.loc['MEDIAN', 'DISTANCE']:,.2f}; "
+                f"p95={distance_rows.loc['P95', 'DISTANCE']:,.2f}; "
+                f"maximum={distance_rows.loc['MAX', 'DISTANCE']:,.2f}"
+            )
         final_stands = s4.build_final_stands(stands_df, weights_filtered, tree_list)
+        _validate_final_inventory(stands_df, final_stands, tree_list)
+        if (
+            config.small_stands["remaining_small_stand_action"]
+            == "proximity_merge"
+            and not still_missing.empty
+        ):
+            raise RuntimeError(
+                "Proximity-merge run left FVS stands without trees."
+            )
+        qa_metrics["donor_weight_maximum_error"] = donor_weight_error
+        qa_metrics["imputation"] = {
+            "diagnostic_rows": int(len(imputation_diagnostics)),
+            "summary_rows": int(len(imputation_summary)),
+            "distance_units": distance_units,
+        }
         _write_dataframe_outputs(
             paths, stands_df, weights_filtered, final_stands, tree_list, still_missing
         )
 
     with timed_stage("Stage 5 - Create FVS databases", timings):
         db_summary = _build_databases(config, paths, final_stands, tree_list)
+        if config.database["mode"] == "grouped":
+            grouped_stands = int(db_summary["STANDS"].sum())
+            if grouped_stands != int(final_stands["STAND_ID"].nunique()):
+                raise RuntimeError(
+                    "Grouped database stand counts do not equal unique final stands."
+                )
 
     finished = datetime.now()
     timing_rows = [{"STAGE": item.name, "SECONDS": item.seconds} for item in timings]
@@ -358,7 +529,11 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "databases_created": int(len(db_summary)),
         "run_folder": paths["run"],
         "stage_timings": timing_rows,
-        "qa_metrics": qa_metrics,
+        "qa_metrics": {
+            **qa_metrics,
+            "proximity_merge": dict(s2.PROXIMITY_MERGE_QA),
+            "proximity_chain_qa": stage2_mu_qa,
+        },
     }
     Path(paths["run"], "Run_Summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -395,6 +570,7 @@ def run_pipeline(config: RunConfig) -> dict[str, Any]:
         "config": config,
         "paths": paths,
         "rasters": raster_outputs,
+        "management_segments": management_segments,
         "management_units": management_units,
         "stands": stands_df,
         "weights": weights_filtered,

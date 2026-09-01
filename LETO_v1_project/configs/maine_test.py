@@ -55,6 +55,7 @@ CONFIG = {
         "source_nodata": -999999,
         "output_nodata": -9999,
         "coverage_check_nodata": -999999999,
+        "write_qa_provenance_rasters": True,
         "stored_value_multipliers": {
             "STDAGE": 1.0,
             "FORTYPCD": 1.0,
@@ -105,9 +106,26 @@ CONFIG = {
         "similar_merge_require_same_fortypcd": True,
         "similar_merge_min_shared_edges": 2,
         "similar_merge_max_passes": 50,
-        # Baseline behavior. Proximity merging will be added after this
-        # project reproduces the verified Maine result.
+        # Legacy key retained for existing configurations.
         "remaining_small_stand_action": "force_merge",
+    },
+
+    "small_stands": {
+        # Keep force_merge for exact Maine baseline reproduction. Change only
+        # this value to "proximity_merge" to enable the optional grouping.
+        "remaining_small_stand_action": "force_merge",
+        "maximum_distance_meters": 60.0,
+        "require_same_ownership": True,
+        "require_same_forest_type": True,
+        "maximum_combined_acres": 300.0,
+        "retain_when_no_candidate": True,
+    },
+
+    "proximity_chain_qa": {
+        "enabled": True,
+        "warning_chain_ratio": 2.0,
+        "write_component_pair_csv": False,
+        "acreage_tolerance_acres": 0.01,
     },
 
     "riparian": {

@@ -19,6 +19,8 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage
 
+from .small_stands import plan_proximity_merges
+
 
 # ============================================================
 # USER INPUTS
@@ -98,6 +100,13 @@ SHARED_EDGE_BONUS = None
 Z_CLIP = None
 READ_NODATA = None
 REMAINING_SMALL_STAND_ACTION = None
+PROXIMITY_MAXIMUM_DISTANCE_METERS = None
+PROXIMITY_REQUIRE_SAME_OWNERSHIP = None
+PROXIMITY_REQUIRE_SAME_FOREST_TYPE = None
+PROXIMITY_MAXIMUM_COMBINED_ACRES = None
+PROXIMITY_RETAIN_WHEN_NO_CANDIDATE = None
+PROXIMITY_QA_CSV = None
+PROXIMITY_MERGE_QA = {}
 REPORT_TIMING = None
 MERGE_SIMILAR_STANDS = None
 SIMILAR_MERGE_MAX_AGE_DIFFERENCE = None
@@ -1482,7 +1491,8 @@ def _calculate_split_fields(feature_class):
     ) as cursor:
         for row in cursor:
             row[2] = int(row[0])
-            row[3] = int(row[0])
+            if row[3] is None:
+                row[3] = int(row[0])
             row[4] = f"SEG_{int(row[1])}"
             row[5] = float(row[6].getArea("GEODESIC", "ACRES"))
             cursor.updateRow(row)
@@ -1651,6 +1661,104 @@ def finalize_database_groups(feature_class):
             if int(mgmt_class or 0) == RIPARIAN_MANAGEMENT_CODE:
                 group = "Riparian"
             cursor.updateRow((mgmt_class, owner_type, group))
+
+def apply_proximity_merge():
+    """Assign shared MU_ID values to eligible nearby segment polygons."""
+    global PROXIMITY_MERGE_QA
+
+    required_fields = ["OID@", "SEG_ID", "Acres", "OWN_CODE", "FORTYPCD_DOM", "STDAGE_MEAN"]
+    units = []
+    oid_to_segment = {}
+    with arcpy.da.SearchCursor(segment_polygons, required_fields) as cursor:
+        for oid, seg_id, acres, owner, forest_type, age in cursor:
+            seg_id = int(seg_id)
+            oid_to_segment[int(oid)] = seg_id
+            units.append({
+                "SEG_ID": seg_id,
+                "Acres": acres,
+                "OWN_CODE": owner,
+                "FORTYPCD_DOM": forest_type,
+                "STDAGE_MEAN": age,
+            })
+
+    near_table = os.path.join(output_gdb, "_proximity_merge_near")
+    _delete_if_exists(near_table)
+    arcpy.analysis.GenerateNearTable(
+        in_features=segment_polygons,
+        near_features=segment_polygons,
+        out_table=near_table,
+        search_radius=f"{float(PROXIMITY_MAXIMUM_DISTANCE_METERS):g} Meters",
+        location="NO_LOCATION",
+        angle="NO_ANGLE",
+        closest="ALL",
+        method="GEODESIC",
+    )
+    candidate_rows = []
+    with arcpy.da.SearchCursor(
+        near_table, ["IN_FID", "NEAR_FID", "NEAR_DIST"]
+    ) as cursor:
+        for source_oid, target_oid, distance in cursor:
+            source_id = oid_to_segment.get(int(source_oid))
+            target_id = oid_to_segment.get(int(target_oid))
+            if source_id is None or target_id is None:
+                continue
+            candidate_rows.append({
+                "SOURCE_SEG_ID": source_id,
+                "TARGET_SEG_ID": target_id,
+                "DISTANCE_METERS": float(distance),
+            })
+
+    mapping, merges, qa = plan_proximity_merges(
+        pd.DataFrame(units),
+        pd.DataFrame(
+            candidate_rows,
+            columns=["SOURCE_SEG_ID", "TARGET_SEG_ID", "DISTANCE_METERS"],
+        ),
+        minimum_acres=float(MIN_STAND_ACRES),
+        maximum_distance_meters=float(PROXIMITY_MAXIMUM_DISTANCE_METERS),
+        maximum_combined_acres=float(PROXIMITY_MAXIMUM_COMBINED_ACRES),
+        require_same_ownership=bool(PROXIMITY_REQUIRE_SAME_OWNERSHIP),
+        require_same_forest_type=bool(PROXIMITY_REQUIRE_SAME_FOREST_TYPE),
+        retain_when_no_candidate=bool(PROXIMITY_RETAIN_WHEN_NO_CANDIDATE),
+    )
+    lookup = mapping.set_index("SEG_ID").to_dict(orient="index")
+    _add_field_if_missing(segment_polygons, "MU_ID", "LONG")
+    _add_field_if_missing(segment_polygons, "MU_PART", "LONG")
+    _add_field_if_missing(
+        segment_polygons, "MU_SEG_IDS", "TEXT", field_length=4000
+    )
+    with arcpy.da.UpdateCursor(
+        segment_polygons, ["SEG_ID", "MU_ID", "MU_PART", "MU_SEG_IDS"]
+    ) as cursor:
+        for row in cursor:
+            assignment = lookup[int(row[0])]
+            row[1] = int(assignment["MU_ID"])
+            row[2] = int(assignment["MU_PART"])
+            row[3] = assignment["MU_SEG_IDS"]
+            cursor.updateRow(row)
+
+    if PROXIMITY_QA_CSV:
+        merges.to_csv(PROXIMITY_QA_CSV, index=False)
+    PROXIMITY_MERGE_QA = qa
+    message(f"Proximity merges: {qa['proximity_merges']:,}")
+    message(
+        "Proximity merge distance (average / maximum): "
+        f"{qa['average_merge_distance_meters']:.2f} / "
+        f"{qa['maximum_merge_distance_meters']:.2f} meters"
+    )
+    message(
+        f"Multipart management units: {qa['multipart_management_units']:,}; "
+        "average segments per multipart unit: "
+        f"{qa['average_segments_per_multipart_unit']:.2f}"
+    )
+    message(f"Small stands remaining: {qa['small_stands_remaining']:,}")
+    message(
+        "Proximity acreage before / after: "
+        f"{qa['total_acres_before']:.6f} / {qa['total_acres_after']:.6f}"
+    )
+    _delete_if_exists(near_table)
+    return qa
+
 
 def create_riparian_stands():
     """
@@ -2053,9 +2161,15 @@ def main():
         labels = renumber_segments(labels)
         message(f"Deleted undersized segments: {deleted_segments:,}")
         message(f"Deleted forest cells: {deleted_cells:,} ({deleted_cells * cell_acres:,.2f} acres)")
+    elif action == "proximity_merge":
+        message(
+            "Residual small segments retained for non-geometric proximity "
+            "grouping after polygon creation."
+        )
     else:
         raise ValueError(
-            "REMAINING_SMALL_STAND_ACTION must be 'delete', 'retain', or 'force_merge'."
+            "REMAINING_SMALL_STAND_ACTION must be 'delete', 'retain', "
+            "'force_merge', or 'proximity_merge'."
         )
     final_count = int(labels.max())
     message(f"Final segment count: {final_count:,}")
@@ -2107,6 +2221,12 @@ def main():
     message("=" * 60)
     write_segment_polygons(summary)
     message(f"Segment polygons written:\n{segment_polygons}")
+
+    if str(REMAINING_SMALL_STAND_ACTION).lower().strip() == "proximity_merge":
+        message("=" * 60)
+        message("GROUPING NEARBY UNDERSIZED MANAGEMENT UNITS")
+        message("=" * 60)
+        apply_proximity_merge()
 
     if CREATE_RIPARIAN_STANDS:
         message("=" * 60)

@@ -35,6 +35,8 @@ class RunConfig:
     raster_model: dict[str, Any] = field(default_factory=dict)
     ownership: dict[str, Any] = field(default_factory=dict)
     segmentation: dict[str, Any] = field(default_factory=dict)
+    small_stands: dict[str, Any] = field(default_factory=dict)
+    proximity_chain_qa: dict[str, Any] = field(default_factory=dict)
     riparian: dict[str, Any] = field(default_factory=dict)
     inventory: dict[str, Any] = field(default_factory=dict)
     database: dict[str, Any] = field(default_factory=dict)
@@ -91,8 +93,82 @@ def load_config(path: str | Path) -> RunConfig:
     raw.setdefault("raster_model", {})
     raw.setdefault("ownership", {})
     raw.setdefault("segmentation", {})
+    small_stand_defaults = {
+        "remaining_small_stand_action": raw["segmentation"].get(
+            "remaining_small_stand_action", "retain"
+        ),
+        "maximum_distance_meters": 60.0,
+        "require_same_ownership": True,
+        "require_same_forest_type": True,
+        "maximum_combined_acres": raw["segmentation"].get(
+            "maximum_stand_acres", 300.0
+        ),
+        "retain_when_no_candidate": True,
+    }
+    supplied_small_stands = dict(raw.get("small_stands", {}))
+    raw["small_stands"] = {
+        **small_stand_defaults,
+        **supplied_small_stands,
+    }
+    chain_qa_defaults = {
+        "enabled": True,
+        "warning_chain_ratio": 2.0,
+        "write_component_pair_csv": False,
+        "acreage_tolerance_acres": 0.01,
+    }
+    raw["proximity_chain_qa"] = {
+        **chain_qa_defaults,
+        **dict(raw.get("proximity_chain_qa", {})),
+    }
     raw.setdefault("riparian", {})
     raw.setdefault("inventory", {})
     raw.setdefault("database", {})
+
+    action = str(
+        raw["small_stands"]["remaining_small_stand_action"]
+    ).lower().strip()
+    allowed_actions = {"force_merge", "retain", "delete", "proximity_merge"}
+    if action not in allowed_actions:
+        raise ValueError(
+            "small_stands.remaining_small_stand_action must be one of "
+            f"{sorted(allowed_actions)}."
+        )
+    raw["small_stands"]["remaining_small_stand_action"] = action
+    for key in ("maximum_distance_meters", "maximum_combined_acres"):
+        try:
+            value = float(raw["small_stands"][key])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"small_stands.{key} must be a positive number."
+            ) from exc
+        if value <= 0:
+            raise ValueError(
+                f"small_stands.{key} must be a positive number."
+            )
+        raw["small_stands"][key] = value
+    minimum_acres = float(
+        raw["segmentation"].get("minimum_stand_acres", 0)
+    )
+    if (
+        action == "proximity_merge"
+        and raw["small_stands"]["maximum_combined_acres"] < minimum_acres
+    ):
+        raise ValueError(
+            "small_stands.maximum_combined_acres must be at least "
+            "segmentation.minimum_stand_acres."
+        )
+
+    try:
+        warning_ratio = float(raw["proximity_chain_qa"]["warning_chain_ratio"])
+        acreage_tolerance = float(raw["proximity_chain_qa"]["acreage_tolerance_acres"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("proximity_chain_qa ratios and tolerances must be numeric.") from exc
+    if warning_ratio <= 0 or acreage_tolerance < 0:
+        raise ValueError(
+            "proximity_chain_qa.warning_chain_ratio must be positive and "
+            "acreage_tolerance_acres must be non-negative."
+        )
+    raw["proximity_chain_qa"]["warning_chain_ratio"] = warning_ratio
+    raw["proximity_chain_qa"]["acreage_tolerance_acres"] = acreage_tolerance
 
     return RunConfig(**raw)
