@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from scipy import ndimage
 
+from .raster_lookup import assign_records_to_raster
+
 
 
 
@@ -675,55 +677,19 @@ def write_lookup_raster(
         f"Building {field} raster..."
     )
 
-    source_valid = source_array != source_nodata
-
-    working_array = np.full(
-        source_array.shape,
-        np.nan,
-        dtype=np.float64,
+    (
+        working_array,
+        provenance,
+        source_valid,
+        reason_counts,
+        matched_values,
+    ) = assign_records_to_raster(
+        source_array,
+        value_records,
+        field,
+        source_nodata=source_nodata,
+        decimal_multiplier=decimal_multiplier,
     )
-
-    matched_values = 0
-    provenance = np.zeros(source_array.shape, dtype=np.uint8)
-    reason_masks = {
-        "MISSING_FIA_PLT_CN": np.zeros(source_array.shape, dtype=bool),
-        "FIA_ATTRIBUTE_MISSING": np.zeros(source_array.shape, dtype=bool),
-        "NO_LIVE_TREES": np.zeros(source_array.shape, dtype=bool),
-        "TREEMAP_RAT_ATTRIBUTE_MISSING": np.zeros(source_array.shape, dtype=bool),
-    }
-
-    for raster_value, record in value_records.items():
-        field_value = record.get(field)
-
-        if pd.isna(field_value):
-            cell_mask = source_array == raster_value
-            fia_found = bool(record.get("_FIA_PLOT_FOUND", False))
-            reason_masks["MISSING_FIA_PLT_CN"][cell_mask] = not fia_found
-            reason_masks["FIA_ATTRIBUTE_MISSING"][cell_mask] = (
-                fia_found
-                and not bool(record.get(f"_FIA_ATTRIBUTE_AVAILABLE_{field}", False))
-            )
-            reason_masks["TREEMAP_RAT_ATTRIBUTE_MISSING"][cell_mask] = (
-                not bool(record.get(f"_RAT_ATTRIBUTE_AVAILABLE_{field}", False))
-            )
-            if field in {"QMD", "TPA"} and fia_found:
-                live_records = record.get("LIVE_TREE_RECORDS")
-                reason_masks["NO_LIVE_TREES"][cell_mask] = (
-                    pd.isna(live_records) or float(live_records or 0) <= 0
-                )
-            continue
-
-        stored_value = (
-            float(field_value)
-            * decimal_multiplier
-        )
-
-        cell_mask = source_array == raster_value
-
-        if np.any(cell_mask):
-            working_array[cell_mask] = stored_value
-            provenance[cell_mask] = int(record.get(f"_SOURCE_{field}", 1))
-            matched_values += 1
 
     assigned_before_fill = (
         source_valid
@@ -828,18 +794,16 @@ def write_lookup_raster(
     own_ids = np.arange(source_array.size, dtype=np.int64).reshape(source_array.shape)
     donor_cell_id[assigned_before_fill] = own_ids[assigned_before_fill]
     if missing_before_fill > 0:
-        rows, cols = np.indices(source_array.shape)
-        donor_rows = nearest_indices[0]
-        donor_cols = nearest_indices[1]
-        distances = np.sqrt(
-            np.square((rows - donor_rows) * abs(cell_height))
-            + np.square((cols - donor_cols) * abs(cell_width))
+        missing_rows, missing_cols = np.nonzero(missing_mask)
+        donor_rows = nearest_indices[0][missing_mask]
+        donor_cols = nearest_indices[1][missing_mask]
+        distance_map_units[missing_mask] = np.sqrt(
+            np.square((missing_rows - donor_rows) * abs(cell_height))
+            + np.square((missing_cols - donor_cols) * abs(cell_width))
         )
-        distance_map_units[missing_mask] = distances[missing_mask]
-        nearest_flat = np.ravel_multi_index(
+        donor_cell_id[missing_mask] = np.ravel_multi_index(
             (donor_rows, donor_cols), source_array.shape
         )
-        donor_cell_id[missing_mask] = nearest_flat[missing_mask]
 
     return {
         "matched_cells": matched_cells,
@@ -847,10 +811,7 @@ def write_lookup_raster(
         "nearest_distance": distance_map_units,
         "donor_cell_id": donor_cell_id,
         "source_valid": source_valid,
-        "reason_counts": {
-            reason: int((mask & missing_mask).sum())
-            for reason, mask in reason_masks.items()
-        },
+        "reason_counts": reason_counts,
     }
 
 
@@ -1478,3 +1439,4 @@ def run_stage(config):
         "qa_raster_imputation_summary": stage1_qa_summary_csv,
         "qa_landscape_imputation_summary": stage1_qa_landscape_csv,
     }
+
