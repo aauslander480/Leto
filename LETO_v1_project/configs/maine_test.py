@@ -120,6 +120,7 @@ CONFIG = {
     "small_stands": {
         # Keep force_merge for exact Maine baseline reproduction. Change only
         # this value to "proximity_merge" to enable the optional grouping.
+        # other oprions include: "retain", "delete", and "proximity_merge"
         "remaining_small_stand_action": "force_merge",
         "maximum_distance_meters": 60.0,
         "require_same_ownership": True,
