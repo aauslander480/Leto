@@ -704,7 +704,10 @@ class _Analysis:
         radius = _distance_meters(search_radius, factor) / factor if search_radius else None
         targets = list(right.getSelectedFeatures() if str(near_features) in _aliases else right.getFeatures())
         geometries = {f.id(): f.geometry() for f in targets}
-        index = q.QgsSpatialIndex(iter(targets), flags=q.QgsSpatialIndex.FlagStoreFeatureGeometries)
+        index = q.QgsSpatialIndex(flags=q.QgsSpatialIndex.FlagStoreFeatureGeometries)
+        for target in targets:
+            if not index.addFeature(target):
+                raise RuntimeError(f'Cannot index donor feature {target.id()}')
         same = left.source() == right.source()
         sources = left.getSelectedFeatures() if str(in_features) in _aliases else left.getFeatures()
         rows, ties = [], []

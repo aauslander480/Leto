@@ -137,3 +137,37 @@ def test_overlay_buffers_keep_acreage(tmp_path):
 def test_geodesic_near_is_never_silently_planar(tmp_path):
     with pytest.raises(NotImplementedError, match='GEODESIC'):
         gis.analysis.GenerateNearTable('unused', 'unused', str(tmp_path / 'near'), method='GEODESIC')
+
+
+def test_stage_polygon_finalization_and_donor_handoff(tmp_path, monkeypatch):
+    """Exercise real stage calls together, beyond individual backend methods."""
+    import pandas as pd
+    from leto import stage2_segmentation as s2, stage3_crosswalk as s3
+    from leto.pipeline import _ensure_management_units
+    from leto.spatial_management_units import finalize_management_outputs
+    labels = raster(tmp_path / 'labels.tif', np.array([[1, 2]], dtype=np.int32))
+    treemap = raster(tmp_path / 'treemap.tif', np.array([[10, 20]], dtype=np.int32))
+    polygons = str(tmp_path / 'segments')
+    summary = pd.DataFrame({'SEG_ID': [1, 2], 'Acres': [900/4046.8564224]*2,
+                            'STDAGE_MEAN': [30., 40.], 'FORTYPCD_DOM': [101, 101],
+                            'OWN_TYPE': ['Family', 'Family'], 'OWN_CODE': [3, 3]})
+    csv = tmp_path / 'summary.csv'
+    summary.to_csv(csv, index=False)
+    monkeypatch.setattr(s2, 'segment_raster', labels)
+    monkeypatch.setattr(s2, 'segment_polygons', polygons)
+    monkeypatch.setattr(s2, 'segment_summary_csv', str(csv))
+    monkeypatch.setattr(s2, 'output_gdb', str(tmp_path))
+    s2.write_segment_polygons(summary)
+    components, units = str(tmp_path / 'components'), str(tmp_path / 'units')
+    _ensure_management_units(polygons, components)
+    qa = finalize_management_outputs(components, components, units,
+         proximity_enabled=False, maximum_distance_meters=60,
+         warning_chain_ratio=2, qa_folder=str(tmp_path), acreage_tolerance_acres=0.01)
+    assert qa['component_polygons'] == qa['final_management_units'] == 2
+    info = s3.validate_raster_alignment(labels, treemap)
+    parents = s3.build_weights_table(labels, treemap, {10: 'A', 20: 'B'}, s3.cell_area_acres(info))
+    stands = s3.read_management_units(units)
+    parts = s3.read_management_segments(components)
+    weights = s3.expand_parent_weights_to_management_units(parents, stands, parts)
+    assert set(weights['PLT_CN']) == {'A', 'B'}
+    assert all(abs(v - 1) < 1e-12 for v in weights.groupby('MU_ID')['WEIGHT'].sum())
