@@ -1,0 +1,28 @@
+[project]
+name = "leto-forest-model-qgis"
+version = "1.0.0"
+description = "Landscape segmentation and FVS inventory preparation"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "xlrd>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["leto*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

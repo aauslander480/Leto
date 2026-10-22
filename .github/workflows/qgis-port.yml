@@ -1,0 +1,25 @@
+name: QGIS port tests
+on:
+  push:
+    paths: ['LETO_qgis_project/**', '.github/workflows/qgis-port.yml']
+  pull_request:
+    paths: ['LETO_qgis_project/**', '.github/workflows/qgis-port.yml']
+permissions:
+  contents: read
+jobs:
+  qgis:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system QGIS and scientific Python
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-qgis python3-scipy python3-pandas python3-pytest python3-xlrd
+      - name: Test real PyQGIS and preserved scientific functions
+        working-directory: LETO_qgis_project
+        run: |
+          /usr/bin/python3 run_leto.py --check-runtime
+          /usr/bin/python3 -m pytest -q
