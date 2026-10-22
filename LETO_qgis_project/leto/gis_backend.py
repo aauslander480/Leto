@@ -329,6 +329,12 @@ class _Cursor:
         if not self.update:
             raise RuntimeError('Read-only cursor')
         for name, value in zip(self.fields, values):
+            # QVariant does not reliably recognize NumPy's scalar types.
+            # Pandas aggregation returns these even for ordinary integer fields.
+            if isinstance(value, np.generic):
+                value = value.item()
+            if value is pd.NA:
+                value = None
             if name == 'OID@':
                 continue
             if name == 'SHAPE@':
