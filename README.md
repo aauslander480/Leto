@@ -8,6 +8,11 @@ The actively developed implementation lives in `LETO_v1_project/`. The older
 workflow scripts remain in `scripts/` for reference while the v1 package is used
 for new development.
 
+An independent, experimental PyQGIS/GDAL port is in `LETO_qgis_project/`.
+It includes a Sapelo2 configuration and Slurm template. The original ArcPy
+implementation is unchanged. Read the port README for runtime requirements,
+scientific-validation status, and unsupported geodesic-near configurations.
+
 
 ## Repository layout
 
@@ -46,3 +51,4 @@ then run the package entry script from an ArcGIS Pro Python environment:
 Large input datasets are not distributed with this repository. Users must
 download TreeMap, FIA, ownership, and FVS reference data from their official
 sources.
+
