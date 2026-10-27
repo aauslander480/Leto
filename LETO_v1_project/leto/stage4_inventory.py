@@ -43,15 +43,15 @@ from .imputation_qa import summarize_fia_donors
 # =============================================================================
 
 segment_folder = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
+    r"C:\path\to\data"
 )
 
 stand_polygons = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands\TreeMap_Segmentation.gdb\ManagementUnits_Final"
+    r"C:\path\to\data.gdb\ManagementUnits_Final"
 )
 
 segment_gdb = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands\TreeMap_Segmentation.gdb"
+    r"C:\path\to\data.gdb"
 )
 
 weights_csv = os.path.join(
@@ -65,7 +65,7 @@ stand_list_csv = os.path.join(
 )
 
 # Final FVS CSV output folder
-out_folder = r"D:\Misc\Maine_5_co\ME_CSV_08042026"
+out_folder = r"C:\path\to\data"
 os.makedirs(out_folder, exist_ok=True)
 
 fvs_stands_csv = os.path.join(
@@ -104,16 +104,16 @@ qa_run_summary_txt = os.path.join(
 )
 
 species_crosswalk_xls = (
-    r"D:\forest_condition_2026\FVS\FVS_SpeciesCrosswalk.xls"
+    r"C:\path\to\FVS_SpeciesCrosswalk.xls"
 )
 
 species_crosswalk_sheet = "EasternSpeciesTranslator"
 
 fia_tree_files = [
-    r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\MA_TREE.csv",
-    r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\ME_TREE.csv",
-    r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\NH_TREE.csv",
-    r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\NY_TREE.csv",
+    r"C:\path\to\MA_TREE.csv",
+    r"C:\path\to\ME_TREE.csv",
+    r"C:\path\to\NH_TREE.csv",
+    r"C:\path\to\NY_TREE.csv",
    
 ]
 

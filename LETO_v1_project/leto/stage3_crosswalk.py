@@ -41,32 +41,28 @@ from .small_stands import aggregate_management_unit_weights
 
 # Final management units written by Script 2.
 stand_polygons = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
-    r"\TreeMap_Segmentation.gdb\ManagementUnits_Final"
+    r"C:\path\to\data.gdb\ManagementUnits_Final"
 )
 
 # Biological parent-segment raster written before riparian splitting.
 segment_raster = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
-    r"\TreeMap_Segments_Initial.tif"
+    r"C:\path\to\TreeMap_Segments_Initial.tif"
 )
 
 # Spatial TreeMap raster clipped in Script 1. This must align exactly with
 # segment_raster and is used for cell-by-cell VALUE pairing.
 treemap_spatial_raster = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
-    r"\Segmentation_Working.gdb\TreeMap_Clipped"
+    r"C:\path\to\data.gdb\TreeMap_Clipped"
 )
 
 # Full CONUS TreeMap raster containing VALUE and PLT_CN in its raster
 # attribute table. This raster is used only for VALUE-to-PLT_CN lookup.
 treemap_lookup_raster = (
-    r"D:\Misc\Whole_treemap\RDS-2025-0032 (1)"
-    r"\Data\TreeMap2022_CONUS.tif"
+    r"C:\path\to\TreeMap2022_CONUS.tif"
 )
 
 output_folder = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
+    r"C:\path\to\data"
 )
 
 weights_csv = os.path.join(

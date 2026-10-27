@@ -11,10 +11,10 @@ import pandas as pd
 # -------------------------------------------------------
 
 # Folder containing FVS_StandInit.csv and FVS_TreeInit.csv.
-input_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
+input_folder = r"C:\path\to\data"
 
 # Parent folder where one uniquely named folder will be created for each run.
-runs_root_folder = r"D:\forest_condition_2026\FVS\FVS_Database_Runs"
+runs_root_folder = r"C:\path\to\data"
 
 # Descriptive label included in the run-folder name.
 RUN_NAME = "Hard_Ownership_Boundaries"
@@ -22,7 +22,7 @@ RUN_NAME = "Hard_Ownership_Boundaries"
 # Copy the principal CSV and QA inputs into the run folder for reproducibility.
 COPY_RUN_INPUTS = True
 
-blank_db = r"D:\forest_condition_2026\FVS\FVS_Data.db"
+blank_db = r"C:\path\to\FVS_Data.db"
 stand_csv_name = "FVS_StandInit.csv"
 tree_csv_name = "FVS_TreeInit.csv"
 output_name_prefix = "FVS_Inventory"

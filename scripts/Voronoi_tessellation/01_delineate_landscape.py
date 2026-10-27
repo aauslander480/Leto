@@ -13,19 +13,19 @@ import numpy as np
 
 #First your gdb you will be working out of:
 
-WORKSPACE = r"D:\forest_condition_2026\Stand_delineation\Attempt3\Attempt3.gdb"
+WORKSPACE = r"C:\path\to\data.gdb"
 
 # Also, create a folder for the weighted plot cn table and add the path here, this folder will be used again in future scripts.
 
-out_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
+out_folder = r"C:\path\to\data"
 
 #Then TreeMap
 
-TREEMAP = r"D:\forest_condition_2026\Stand_delineation\TreeMap_2022\TreeMap_2022.tif"
+TREEMAP = r"C:\path\to\TreeMap_2022.tif"
 
 #The RDS 2025 Forest Service publication ownership raster layer @ https://www.fs.usda.gov/rds/archive/catalog/RDS-2025-0045?
 
-OWNERSHIP_RASTER = r"D:\forest_condition_2026\Stand_delineation\RDS-2025-0045 (1)\Data\US_forest_ownership.tif"
+OWNERSHIP_RASTER = r"C:\path\to\US_forest_ownership.tif"
 
 OWNERSHIP_LOOKUP = {
     0: "Unknown Forest",

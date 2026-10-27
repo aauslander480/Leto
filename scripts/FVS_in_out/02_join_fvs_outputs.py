@@ -10,27 +10,27 @@ import arcpy
 # -------------------------------------------------------
 
 # Geodatabase containing ManagementUnits_Final
-gdb = r"D:\forest_condition_2026\Stand_delineation\Attempt3\Attempt3.gdb"
+gdb = r"C:\path\to\data.gdb"
 
 # Management-unit feature class
 mu_fc = os.path.join(gdb, "ManagementUnits_Final")
 
 # FVS output database downloaded after running FVS
-fvs_out_db = r""C:\Users\aca28742\Downloads\bivariate_test.db""
+fvs_out_db = r"C:\path\to\bivariate_test.db"
 
 # FIA REF_SPECIES table downloaded from FIA DataMart.
 # Required fields:
 #   SPCD
 #   SPGRPCD
 fia_species_csv = (
-    r""C:\Users\aca28742\Downloads\FIADB_REFERENCE\REF_SPECIES.csv""
+    r"C:\path\to\REF_SPECIES.csv"
     )
 # Output naming
 scenario_name = os.path.splitext(
     os.path.basename(fvs_out_db)
 )[0]
 
-out_folder = r"D:\forest_condition_2026\FVS\FVS_Outputs"
+out_folder = r"C:\path\to\data"
 os.makedirs(out_folder, exist_ok=True)
 
 summary_csv = os.path.join(

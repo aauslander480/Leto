@@ -27,7 +27,7 @@ from .small_stands import plan_proximity_merges
 # ============================================================
 
 input_folder = (
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
+    r"C:\path\to\data"
 )
 
 age_raster = os.path.join(input_folder, "TreeMap_STDAGE.tif")
@@ -37,7 +37,7 @@ qmd_raster = os.path.join(input_folder, "TreeMap_QMD.tif")
 tpa_raster = os.path.join(input_folder, "TreeMap_TPA.tif")
 
 output_folder = os.path.join(
-    r"D:\Misc\Maine_5_co\ME_Output_stands"
+    r"C:\path\to\data"
 )
 
 output_gdb = os.path.join(output_folder, "TreeMap_Segmentation.gdb")
@@ -47,19 +47,13 @@ segment_summary_csv = os.path.join(output_folder, "TreeMap_Segment_Summary.csv")
 
 # NHDPlus High Resolution national hydrography inputs.
 nhd_flowline = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NetworkNHDFlowline"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NetworkNHDFlowline"
 )
 nhd_area = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NHDArea"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NHDArea"
 )
 nhd_waterbody = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NHDWaterbody"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NHDWaterbody"
 )
 
 # USFWS National Wetlands Inventory polygon inputs.
@@ -162,7 +156,7 @@ USE_OWNERSHIP_HARD_BOUNDARIES = None
 # National Forest Service ownership raster from RDS-2025-0045.
 # Update this path to the downloaded raster on your computer.
 OWNERSHIP_SOURCE_RASTER = (
-    r"D:\forest_condition_2026\Stand_delineation\RDS-2025-0045 (1)\Data\US_forest_ownership.tif"
+    r"C:\path\to\US_forest_ownership.tif"
 )
 
 OWNERSHIP_TYPES = {}

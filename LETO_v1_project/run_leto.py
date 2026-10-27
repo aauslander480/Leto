@@ -1,7 +1,7 @@
 r"""Run one LETO region from a Python configuration file.
 
 ArcGIS Pro notebook example:
-    %run r"D:\LETO\run_leto.py" r"D:\LETO\configs\maine_test.py"
+    %run r"C:\path\to\run_leto.py" r"C:\path\to\maine_test.py"
 
 Command prompt example using the ArcGIS Pro Python environment:
     python run_leto.py configs\maine_test.py

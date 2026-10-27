@@ -41,19 +41,15 @@ import pandas as pd
 # =============================================================================
 
 segment_folder = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output"
+    r"C:\path\to\data"
 )
 
 stand_polygons = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output\TreeMap_Segmentation.gdb"
-    r"\ManagementUnits_Final"
+    r"C:\path\to\data.gdb\ManagementUnits_Final"
 )
 
 segment_gdb = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output\TreeMap_Segmentation.gdb"
+    r"C:\path\to\data.gdb"
 )
 
 weights_csv = os.path.join(
@@ -67,7 +63,7 @@ stand_list_csv = os.path.join(
 )
 
 # Final FVS CSV output folder
-out_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
+out_folder = r"C:\path\to\data"
 os.makedirs(out_folder, exist_ok=True)
 
 fvs_stands_csv = os.path.join(
@@ -106,16 +102,16 @@ qa_run_summary_txt = os.path.join(
 )
 
 species_crosswalk_xls = (
-    r"D:\forest_condition_2026\FVS\FVS_SpeciesCrosswalk.xls"
+    r"C:\path\to\FVS_SpeciesCrosswalk.xls"
 )
 
 species_crosswalk_sheet = "EasternSpeciesTranslator"
 
 fia_tree_files = [
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\FL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\GA_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\AL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\SC_TREE.csv",
+    r"C:\path\to\FL_TREE.csv",
+    r"C:\path\to\GA_TREE.csv",
+    r"C:\path\to\AL_TREE.csv",
+    r"C:\path\to\SC_TREE.csv",
 ]
 
 # Donors below this proportion are removed, then the retained weights are

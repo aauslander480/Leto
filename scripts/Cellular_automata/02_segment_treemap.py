@@ -25,8 +25,7 @@ from scipy import ndimage
 # ============================================================
 
 input_folder = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Rasters"
+    r"C:\path\to\data"
 )
 
 age_raster = os.path.join(input_folder, "TreeMap_STDAGE.tif")
@@ -36,7 +35,7 @@ qmd_raster = os.path.join(input_folder, "TreeMap_QMD.tif")
 tpa_raster = os.path.join(input_folder, "TreeMap_TPA.tif")
 
 output_folder = os.path.join(
-    r"D:\forest_condition_2026\Cellular_automata",
+    r"C:\path\to\data",
     "TreeMap_Segmentation_Output",
 )
 
@@ -47,19 +46,13 @@ segment_summary_csv = os.path.join(output_folder, "TreeMap_Segment_Summary.csv")
 
 # NHDPlus High Resolution national hydrography inputs.
 nhd_flowline = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NetworkNHDFlowline"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NetworkNHDFlowline"
 )
 nhd_area = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NHDArea"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NHDArea"
 )
 nhd_waterbody = (
-    r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-    r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-    r"\NHDWaterbody"
+    r"C:\path\to\data.gdb\NHDPlus_H_National\NHDWaterbody"
 )
 
 # USFWS National Wetlands Inventory polygon inputs.
@@ -67,7 +60,7 @@ nhd_waterbody = (
 # clips, merges, and dissolves them automatically, so state boundaries do not
 # affect wetland-percentage calculations.
 NWI_WETLAND_INPUTS = [
-   r"D:\Misc\Stream_buffer_data\FL_geodatabase_wetlands\FL_geodatabase_wetlands.gdb\FL_Wetlands"
+   r"C:\path\to\data.gdb\FL_Wetlands"
 ]
 
 # Riparian-processing outputs.
@@ -185,7 +178,7 @@ WETLAND_MANAGEMENT_CODE = 2
 
 # Update this path to the extracted parcel feature class on your computer.
 PARCEL_OWNERSHIP_LAYER = (
-    r"D:\forest_condition_2026\basemap\FL_5_Co_Parcels (3)\FL_5_Co_Parcels\FL_5_Co_Parcels.gdb\FL_5_Co_Parcels"
+    r"C:\path\to\data.gdb\FL_5_Co_Parcels"
 )
 PARCEL_OWNER_FIELD = "owner"  # Located case-insensitively.
 USE_OWNERSHIP_HARD_BOUNDARIES = True

@@ -9,18 +9,18 @@ import numpy as np
 
 #First, input the path to the .gdb you are working out of, and the for "mu_fc_name" the name of the shapefile/layer created by the first script
 
-gdb = r"D:\forest_condition_2026\Stand_delineation\Attempt3\Attempt3.gdb"
+gdb = r"C:\path\to\data.gdb"
 mu_fc_name = "ManagementUnits_Final"
 mu_fc = os.path.join(gdb, mu_fc_name)
 
 #Then the folder you created earlier for the output table from the last script
 
-out_folder = r"D:\forest_condition_2026\FVS\FVS_Inputs"
+out_folder = r"C:\path\to\data"
 os.makedirs(out_folder, exist_ok=True)
 
 # Add the path to the FIA/FVS Species translator downloadable here: https://www.fs.usda.gov/fmsc/ftp/fvs/docs/overviews/FVS_SpeciesCrosswalk.xls
 
-species_crosswalk_xls = r"D:\forest_condition_2026\FVS\FVS_SpeciesCrosswalk.xls"
+species_crosswalk_xls = r"C:\path\to\FVS_SpeciesCrosswalk.xls"
 species_crosswalk_sheet = "EasternSpeciesTranslator"
 
 # I would recommend making another folder called "FIA_Tree_CSV" where you will store the data from the FIA plots
@@ -30,19 +30,19 @@ species_crosswalk_sheet = "EasternSpeciesTranslator"
 # Add the paths to any state's "TREE.csv" you would like used below
 
 fia_tree_files = [
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\FL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\GA_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\AL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\SC_TREE.csv",
+    r"C:\path\to\FL_TREE.csv",
+    r"C:\path\to\GA_TREE.csv",
+    r"C:\path\to\AL_TREE.csv",
+    r"C:\path\to\SC_TREE.csv",
 ]
 
 # FIA Condition tables (needed for stand age)
 
 fia_cond_files = [
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\FL_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\GA_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\AL_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\SC_COND.csv",
+    r"C:\path\to\FL_COND.csv",
+    r"C:\path\to\GA_COND.csv",
+    r"C:\path\to\AL_COND.csv",
+    r"C:\path\to\SC_COND.csv",
 ]
 
 

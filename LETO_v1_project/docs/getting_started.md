@@ -75,7 +75,7 @@ In an ArcGIS Pro notebook, replace these paths with your own:
 ```
 
 Always pass your configuration. With no argument, the entry point selects
-`configs/maine_test.py`, including its original local paths.
+`configs/maine_test.py`, including placeholder paths.
 
 The entry point runs all five stages and has no stage-selection or resume
 flag. Start with a small boundary to assess coverage and resource needs;

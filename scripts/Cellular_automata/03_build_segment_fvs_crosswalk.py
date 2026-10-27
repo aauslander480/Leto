@@ -38,24 +38,19 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 stand_polygons = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output\TreeMap_Segmentation.gdb"
-    r"\ManagementUnits_Final"
+    r"C:\path\to\data.gdb\ManagementUnits_Final"
 )
 
 segment_raster = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output\TreeMap_Segments_Initial.tif"
+    r"C:\path\to\TreeMap_Segments_Initial.tif"
 )
 
 treemap_raster = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_2022\TreeMap_2022.tif"
+    r"C:\path\to\TreeMap_2022.tif"
 )
 
 output_folder = (
-    r"D:\forest_condition_2026\Cellular_automata"
-    r"\TreeMap_Segmentation_Output"
+    r"C:\path\to\data"
 )
 
 weights_csv = os.path.join(

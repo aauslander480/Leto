@@ -11,24 +11,24 @@ from scipy import ndimage
 
 # TreeMap raster containing VALUE and PLT_CN in its raster
 # attribute table.
-treemap_raster = r"D:\forest_condition_2026\Cellular_automata\Cellular_automata.gdb\TreeMap_2022_Clip"
+treemap_raster = r"C:\path\to\data.gdb\TreeMap_2022_Clip"
 
 fia_tree_files = [
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\FL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\GA_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\AL_TREE.csv",
-    r"D:\forest_condition_2026\FVS\FIA_tree_CSV\SC_TREE.csv",
+    r"C:\path\to\FL_TREE.csv",
+    r"C:\path\to\GA_TREE.csv",
+    r"C:\path\to\AL_TREE.csv",
+    r"C:\path\to\SC_TREE.csv",
 ]
 
 fia_cond_files = [
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\FL_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\GA_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\AL_COND.csv",
-    r"D:\forest_condition_2026\FVS\FIA_Cond_CSV\SC_COND.csv",
+    r"C:\path\to\FL_COND.csv",
+    r"C:\path\to\GA_COND.csv",
+    r"C:\path\to\AL_COND.csv",
+    r"C:\path\to\SC_COND.csv",
 ]
 
 output_folder = (
-    r"D:\forest_condition_2026\Cellular_automata\TreeMap_Segmentation_Rasters"
+    r"C:\path\to\data"
 )
 
 # Field in the TreeMap raster attribute table.
@@ -43,7 +43,7 @@ clip_boundary = None
 
 # Example:
 # clip_boundary = (
-#     r"D:\forest_condition_2026\5co_data\project.gdb"
+#     r"C:\path\to\data.gdb"
 #     r"\Study_Area"
 # )
 
