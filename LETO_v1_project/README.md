@@ -32,15 +32,24 @@ LETO_v1_project/
 └── docs/
 ```
 
+## User documentation
+
+Start with the [repository README](../README.md) and
+[getting-started guide](docs/getting_started.md) for environment setup,
+required inputs, and regional configuration. See [workflow and outputs](docs/workflow.md)
+for results and QA, and [troubleshooting](docs/troubleshooting.md) for common failures.
+
 ## Running in an ArcGIS Pro notebook
 
-Extract the entire ZIP. Then run:
+Clone the repository or extract the complete source archive. Prepare the inputs
+and copy/edit a regional configuration as described in the setup guide. Then run:
 
 ```python
-%run r"D:\path\to\LETO_v1_project\run_leto.py" r"D:\path\to\LETO_v1_project\configs\maine_test.py"
+%run "D:/Leto/LETO_v1_project/run_leto.py" "D:/Leto/LETO_v1_project/configs/my_region.py"
 ```
 
-Edit paths and region-specific settings only in `configs/maine_test.py`.
+Edit paths and region-specific settings in your copied configuration; preserve
+`configs/maine_test.py` as the baseline reference.
 
 ## Running another area
 

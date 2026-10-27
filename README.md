@@ -1,48 +1,107 @@
 # LETO
 
-LETO is a spatial forest landscape modeling workflow that integrates TreeMap,
-Forest Inventory and Analysis (FIA) data, ArcGIS Pro, and the Forest Vegetation
-Simulator (FVS).
+LETO prepares forest landscape units and weighted Forest Vegetation Simulator
+(FVS) inventories from TreeMap and Forest Inventory and Analysis (FIA) data.
+It uses ArcGIS Pro/ArcPy for spatial processing and writes stand/tree CSVs,
+QA reports, and FVS-ready SQLite databases.
 
-The actively developed implementation lives in `LETO_v1_project/`. The older
-workflow scripts remain in `scripts/` for reference while the v1 package is used
-for new development.
+## What it does
 
+1. Builds aligned rasters for forest type, age, basal area, quadratic mean
+   diameter, and trees per acre.
+2. Segments the landscape and creates management units with configured
+   ownership, riparian, and wetland rules.
+3. Calculates management-unit-to-FIA-plot donor weights.
+4. Builds weighted tree lists, with optional nearest-stand imputation.
+5. Writes databases grouped by management/ownership routing, combined, or both.
+
+LETO prepares FVS inputs; the active pipeline does **not** run FVS simulations
+or join simulation results back to maps.
+
+## Before you start
+
+- Full spatial runs require Windows and a licensed ArcGIS Pro Python
+  environment with ArcPy, NumPy, pandas, and SciPy.
+- Input datasets, an FIA-to-FVS species crosswalk workbook, and a compatible
+  blank FVS SQLite database must be supplied separately.
+- The included Maine configuration contains the original author's local
+  paths. Copy it and replace those paths before running.
+- This is a research workflow with a documented Maine baseline, not a bundled
+  sample-data demo. Other regions and optional settings need their own QA.
+
+## Get started
+
+Clone the repository using a GitHub account that has access:
+
+```powershell
+git clone https://github.com/aauslander480/Leto.git
+cd Leto
+git switch main
+cd LETO_v1_project
+Copy-Item configs\maine_test.py configs\my_region.py
+```
+
+Edit `configs/my_region.py`, then use an **ArcGIS Pro Python Command Prompt**
+with your prepared environment:
+
+```bat
+python run_leto.py configs\my_region.py
+```
+
+Follow the [setup and input-data guide](LETO_v1_project/docs/getting_started.md)
+before this command. It covers environment checks, required inputs, notebook
+execution, configuration, and the first-run review.
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Getting started](LETO_v1_project/docs/getting_started.md) | Environment, inputs, configuration, and running |
+| [Workflow and outputs](LETO_v1_project/docs/workflow.md) | Five stages, identifiers, output locations, and QA |
+| [Maine baseline validation](LETO_v1_project/docs/baseline_validation.md) | Reference counts and comparison requirements |
+| [Advanced behavior](LETO_v1_project/README.md) | Proximity grouping, spatial contract, and imputation diagnostics |
+| [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) | Common setup, data, and run failures |
 
 ## Repository layout
 
 ```text
-LETO_v1_project/          Active Python package and tests
-LETO_v1_project/docs/     v1 workflow and validation notes
-LETO_v1_project/configs/  Example run configuration
-scripts/                  Legacy/reference workflow scripts
-workflow/                 Original workflow notes
+LETO_v1_project/          Active implementation
+  run_leto.py            One-region pipeline entry point
+  configs/               Regional configuration and baseline reference
+  leto/                  Configuration, stages, orchestration, and QA
+  tests/                 Unit tests that do not require ArcGIS
+  docs/                  User guides and baseline notes
+scripts/                 Legacy/reference scripts; separate from the v1 entry point
+AGENTS.md                Scientific integrity and development rules
 ```
 
-## Developer quick start
+## Development checks without ArcGIS
 
-From the repository root:
+The package declares Python 3.9 or newer. These commands install the lightweight
+package and test dependencies; they do not install ArcPy or the full GIS runtime.
+
+Windows PowerShell, from the repository root:
+
+```powershell
+cd LETO_v1_project
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+```
+
+macOS/Linux, for the unit tests:
 
 ```bash
 cd LETO_v1_project
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
-python -m pytest
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest
 ```
 
-ArcGIS/ArcPy and FVS are required for end-to-end spatial workflow runs, but the
-unit tests are designed to run without ArcGIS.
+Passing unit tests does not validate an end-to-end spatial run. Read
+[AGENTS.md](AGENTS.md) before contributing; preserve the baseline and document
+any intentional changes to scientific assumptions.
 
-## Running the v1 pipeline in ArcGIS Pro
-
-Edit paths and region-specific settings in `LETO_v1_project/configs/maine_test.py`,
-then run the package entry script from an ArcGIS Pro Python environment:
-
-```python
-%run D:\path\to\LETO_v1_project\run_leto.py D:\path\to\LETO_v1_project\configs\maine_test.py
-```
-
-Large input datasets are not distributed with this repository. Users must
-download TreeMap, FIA, ownership, and FVS reference data from their official
-sources.
+When reporting a problem, include the failing stage, traceback, environment
+versions, relevant configuration with private paths removed, and available QA
+summaries. Do not attach large source datasets.
