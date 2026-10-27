@@ -74,3 +74,8 @@ with the command, expected result, traceback, environment versions, and relevant
 QA summaries. Remove private paths and data.
 
 See [Contributing](CONTRIBUTING.md) for development setup and tests.
+
+## License
+
+LETO is licensed under the [MIT License](LICENSE). External software and input
+datasets retain their own licenses and terms.
