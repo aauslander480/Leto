@@ -8,7 +8,7 @@
 | Missing NumPy, SciPy, pandas, or Excel reader | Check the interpreter printed by `sys.executable`; manage the dependency in that same Pro environment. |
 | Configuration not found / missing `CONFIG` | Pass the configuration path explicitly. The file must define a dictionary named `CONFIG`. |
 | Missing nested key / `KeyError` | Start from a complete copy of `configs/maine_test.py`; loading does not populate every nested setting. |
-| An original author's drive path appears | Replace every path in your regional configuration, including nested ownership, NHD, and optional wetland paths. |
+| An example drive path appears | Replace every path in your regional configuration, including nested ownership, NHD, and optional wetland paths. |
 | TreeMap lookup lacks `PLT_CN` or VALUE codes | Point `treemap_lookup_raster` at the original raster with its attribute table. Preserve the mapping from raster VALUE to donor plot. |
 | Many donors absent from FIA files | Confirm the donor states and source release, not just the study state. Preserve control-number text precision. |
 | Species workbook fails / translations missing | Check file format, Excel reader, sheet and column names, and the translation codes for the chosen FVS variant. Review missing-species QA. |
@@ -23,8 +23,6 @@ datasets. Root-level run summaries are written at the end, so their absence
 can indicate an incomplete run. Retain the traceback and partial QA for
 diagnosis; the entry point does not resume from a selected stage.
 
-For a useful issue report, include the command used, failing stage, full
-traceback, ArcGIS Pro/Python/dependency versions, sanitized configuration,
-and relevant summary or QA rows. Describe expected versus observed behavior.
-Do not include private source data or personal paths unless you intend to
-share them.
+For an issue report, include the command, failing stage, traceback, environment
+versions, expected result, and relevant configuration or QA rows. Remove
+private paths and source data.

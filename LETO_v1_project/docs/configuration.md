@@ -2,12 +2,10 @@
 
 [Getting started](getting_started.md) · [Workflow and outputs](workflow.md)
 
-You configure LETO by editing a Python file containing a dictionary named
-`CONFIG`. You do not need to edit the processing modules for a normal run.
+Edit a Python file containing a dictionary named `CONFIG` to configure LETO.
 
 Copy the complete `configs/maine_test.py` example to `configs/my_region.py`.
-Its filename identifies the original example; its paths, state settings, and
-management rules must be reviewed for your study area. Keep all nested sections,
+Replace its paths and review its regional settings and management rules. Keep all nested sections,
 because the loader does not supply every field consumed by the pipeline.
 
 ## Set your data and workspace
@@ -41,8 +39,7 @@ Avoid concurrent runs writing to the same working geodatabase.
 | `database` | Choose database grouping and sampling design |
 | `proximity_chain_qa` | Choose diagnostics and tolerances for proximity grouping |
 
-These are scientific choices, not just installation settings. Record why they
-fit your analysis rather than assuming the example values apply everywhere.
+Document the analysis choices and why they fit your study area.
 
 ### Small stands
 
@@ -74,15 +71,14 @@ spatial unit will appear in the final runnable inventory.
 Keep sampling design consistent with weighted `TREE_COUNT` values and your
 FVS template. Validate species translations against the selected FVS variant.
 
-## Check and run your configuration
+## Check your configuration
 
 From `LETO_v1_project`:
 
 ```bat
 python -c "from leto.config import load_config; c = load_config('configs/my_region.py'); print(c.region_id, c.run_name)"
-python run_leto.py configs\my_region.py
 ```
 
-The first command checks loading and selected rules. It does not verify all
-data paths, fields, or GIS requirements. The second runs all stages.
-Review [validation](validation.md) before using the resulting inventories.
+This checks loading and selected rules, not all data paths, fields, or GIS
+requirements. Configuration files execute Python when loaded; use files you
+trust. See [Getting started](getting_started.md) to run the pipeline.

@@ -2,9 +2,8 @@
 
 [Getting started](getting_started.md) · [Configuration](configuration.md)
 
-Use the sources below to assemble inputs for your study area. Agency landing
-pages are preferred over version-specific download filenames, so you can
-choose coverage and read metadata before downloading.
+Download inputs for your study area from the sources below. Read each
+product's metadata and retain its version and download date.
 
 Sources reviewed October 27, 2026. The links identify publishers and products;
 large archives and the FVS installer were not downloaded or tested with LETO.
@@ -28,7 +27,7 @@ Keep the downloaded raster's associated attribute/metadata files together.
 If clipping removes lookup attributes, retain the full original lookup raster.
 The TreeMap gateway describes the packaged files and available products.
 
-### FIA: cover the donors, not just the boundary
+### FIA donor coverage
 
 Download TREE and COND records for all states needed to cover the TreeMap donor
 plots. Plot identifiers can refer to records outside your study state's
@@ -37,7 +36,7 @@ Keep the source download dates and releases with your project; the newest FIA
 export is not guaranteed to retain every donor record used by an older TreeMap
 release.
 
-### Species: select the actual variant mapping
+### Species mapping
 
 The official workbook contains mappings for multiple eastern and western
 variants. LETO's supplied example uses `EasternSpeciesTranslator` and
@@ -46,21 +45,18 @@ Inspect the workbook and select the column appropriate to your FVS variant
 through `inventory.species_crosswalk_fvs_columns`, along with the correct
 sheet. Review untranslated-species QA after running.
 
-### FVS template: compatibility must be checked
+### FVS template compatibility
 
-The example filename `FVS_Data.db` is a local path, not a verified standalone
-download name. No standalone download of that exact example file was verified.
-The Complete Package is the official acquisition route; if a suitable template
-is not present, use the support entry on the
+The example's `FVS_Data.db` is a local file; a standalone download of that
+exact file has not been verified. Start with the Complete Package. If it lacks
+a suitable template, use support on the
 [FVS home page](https://www.fs.usda.gov/managing-land/forest-management/fvs).
 
 LETO expects `FVS_StandInit`, `FVS_TreeInit`, and `FVS_PlotInit` tables
 and appends the columns produced by `leto/stage5_database.py`. Check all column
 names and types before using a template. The current FVS Database Extension
 guide notes that some control-number columns are absent from its standard
-blank template, while LETO writes control-number fields. Therefore an
-unmodified current template must not be assumed to be a drop-in replacement
-for the original project's database. Do not create an empty `.db` file or
+blank template, while LETO writes control-number fields. Check compatibility before using the standard template. Do not create an empty `.db` file or
 rename an Access database to satisfy this input.
 
 ## Inputs required by enabled options
@@ -87,7 +83,6 @@ download should not be assumed to have an interchangeable schema.
 - Record source URLs, product versions, download dates, and any preparation.
 - Retain downloaded metadata and follow each source's attribution guidance.
 
-Some USFS archive requests returned access errors during automated review.
-Use the linked TreeMap or NWOS product page to reach the archive in a browser
-if the direct catalog link is blocked. The crosswalk workbook is linked by the
-current official FVS guide page; its binary content was not inspected here.
+If a direct USFS archive link is blocked, use the linked TreeMap or NWOS
+product page to reach it in a browser. The crosswalk workbook's contents have
+not been checked against LETO.

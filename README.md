@@ -1,97 +1,76 @@
 # LETO
 
-Turn TreeMap and Forest Inventory and Analysis (FIA) data into mapped forest
-management units and weighted Forest Vegetation Simulator (FVS) inventories
-for your study area.
+LETO creates forest management units and weighted Forest Vegetation Simulator
+(FVS) inventories from TreeMap and Forest Inventory and Analysis (FIA) data.
+It produces GIS layers, stand and tree CSVs, SQLite databases, and quality
+assurance (QA) reports. FVS simulations are run separately.
 
-LETO brings landscape segmentation, donor-plot weighting, inventory preparation,
-and quality checks into one configurable workflow. Your outputs include GIS
-feature classes, stand and tree CSV files, and FVS-ready SQLite databases.
+## Requirements
 
-## Is LETO a fit for your project?
+LETO is intended for analysts familiar with GIS data, Python configuration
+files, and forest inventory assumptions.
 
-LETO is intended for forest analysts and researchers who work with ArcGIS Pro,
-TreeMap/FIA data, and FVS. You should be comfortable preparing GIS datasets,
-editing a Python configuration file, and reviewing inventory assumptions.
+- Windows and a licensed ArcGIS Pro Python environment.
+- A study boundary and TreeMap raster with donor-plot lookup attributes.
+- FIA TREE and COND exports covering the landscape's donor plots.
+- A species crosswalk workbook and compatible blank FVS SQLite database.
+- Ownership, hydrography, and wetland data for enabled options.
 
-You will need:
+See [Input data and downloads](LETO_v1_project/docs/input_data.md) for sources
+and compatibility requirements. Input datasets are not included.
 
-- Windows with a licensed ArcGIS Pro Python environment.
-- A study boundary and TreeMap raster with its donor-plot lookup attributes.
-- FIA TREE and COND exports covering the donor plots in your landscape.
-- A species translation workbook and compatible blank FVS SQLite database.
-- Ownership, hydrography, and wetland data for the options you enable.
+## Quick start
 
-Input data are supplied separately; see the
-[download directory](LETO_v1_project/docs/input_data.md) for sources and file choices. LETO prepares inventories; running FVS
-simulations is a separate step. There is no graphical setup wizard or bundled
-sample-data run.
-
-## Start with your own study area
-
-1. **Get the source.** Clone the repository or use GitHub's **Code → Download
-   ZIP** and extract the complete archive.
-2. **Prepare your environment and inputs.** Follow the
-   [getting-started guide](LETO_v1_project/docs/getting_started.md).
-3. **Create your configuration.** Copy the supplied regional example, replace
-   paths, and review the [configuration choices](LETO_v1_project/docs/configuration.md).
-4. **Run a small study area first.** From an ArcGIS Pro Python Command Prompt,
-   run the command below.
-5. **Review your results.** Check spatial coverage, species translation, donor
-   weights, and imputation before using the FVS databases.
-
-To clone with Git:
+Clone the repository, or use GitHub's **Code → Download ZIP** and extract it:
 
 ```powershell
 git clone https://github.com/aauslander480/Leto.git
 cd Leto
 git switch main
-```
-
-From the downloaded repository's `LETO_v1_project` folder, in PowerShell:
-
-```powershell
+cd LETO_v1_project
 Copy-Item configs\maine_test.py configs\my_region.py
 ```
 
-The source file is a regional example. Replace its paths and review all
-modeling settings for your project before running:
+Follow [Getting started](LETO_v1_project/docs/getting_started.md) to prepare
+your environment and data. Edit `configs/my_region.py` with your paths,
+regional metadata, and modeling settings.
+
+From `LETO_v1_project` in an ArcGIS Pro Python Command Prompt:
 
 ```bat
 python run_leto.py configs\my_region.py
 ```
 
-You can also [run from an ArcGIS Pro notebook](LETO_v1_project/docs/getting_started.md).
-Always pass your configuration explicitly.
+Pass your configuration explicitly. Start with a small study area and review
+QA before processing the full landscape. Notebook instructions are in the
+setup guide.
 
-## Find what you need
+## Results
 
-| Your task | Guide |
+The console prints a timestamped results folder containing configuration,
+summaries, inventories, databases, and QA reports. Final spatial layers are
+stored in your working geodatabase.
+
+Open `ManagementUnits_Final` in ArcGIS Pro and review `Run_Summary.txt`
+and the QA reports. Check acreage, donor coverage, species losses, and
+imputation before using the inventories.
+
+## Documentation
+
+| Guide | Contents |
 |---|---|
-| Find and download input datasets | [Input data and downloads](LETO_v1_project/docs/input_data.md) |
-| Install prerequisites and prepare input data | [Getting started](LETO_v1_project/docs/getting_started.md) |
-| Choose settings for your landscape | [Configuration](LETO_v1_project/docs/configuration.md) |
-| Locate maps, inventories, databases, and QA reports | [Workflow and outputs](LETO_v1_project/docs/workflow.md) |
-| Decide whether results are suitable for your analysis | [Validation](LETO_v1_project/docs/validation.md) |
-| Resolve an error or unexpected result | [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) |
-| Understand grouping and imputation in detail | [Advanced behavior](LETO_v1_project/docs/advanced_behavior.md) |
+| [Getting started](LETO_v1_project/docs/getting_started.md) | Environment setup and first run |
+| [Input data](LETO_v1_project/docs/input_data.md) | Downloads, formats, and compatibility |
+| [Configuration](LETO_v1_project/docs/configuration.md) | Paths and analysis settings |
+| [Workflow and outputs](LETO_v1_project/docs/workflow.md) | Processing stages, files, and identifiers |
+| [Validation](LETO_v1_project/docs/validation.md) | Checks before using results |
+| [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) | Setup and processing errors |
+| [Advanced behavior](LETO_v1_project/docs/advanced_behavior.md) | Grouping and imputation details |
 
-## What to expect after a run
+## Help and contributions
 
-The console prints a timestamped results folder containing your configuration,
-run summaries, inventory CSVs, databases, and QA reports. Final spatial layers
-are written to your configured working geodatabase. Open
-`ManagementUnits_Final` in ArcGIS Pro to inspect the management units and
-review `Run_Summary.txt` alongside the QA reports.
+For unresolved problems, [open an issue](https://github.com/aauslander480/Leto/issues)
+with the command, expected result, traceback, environment versions, and relevant
+QA summaries. Remove private paths and data.
 
-Each region needs its own data and settings. A successful run still requires
-review of acreage, donor coverage, species losses, and imputed inventories.
-
-## Questions and problems
-
-Check the [troubleshooting guide](LETO_v1_project/docs/troubleshooting.md) first.
-If you still need help, [open an issue](https://github.com/aauslander480/Leto/issues)
-with what you tried, what you expected, the traceback, environment versions,
-and relevant QA summaries. Remove private paths and data before posting.
-
-For code changes and local test setup, see [Contributing](CONTRIBUTING.md).
+See [Contributing](CONTRIBUTING.md) for development setup and tests.

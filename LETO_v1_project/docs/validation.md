@@ -2,9 +2,8 @@
 
 [Getting started](getting_started.md) · [Workflow and outputs](workflow.md)
 
-Validate LETO against the inputs and objectives of your study area. Segment,
-management-unit, stand, and database counts depend on the landscape and
-configuration; another region's counts are not acceptance targets.
+Check results against your study area and analysis objectives. Expected counts
+depend on your inputs and configuration.
 
 ## Establish an accepted reference run
 
@@ -45,7 +44,5 @@ establish a new reference rather than expecting identical outputs.
 
 ## Historical regression example
 
-The repository retains a [Maine regression reference](baseline_validation.md)
-for reproducing the original test setup. It is optional historical evidence
-for that configuration, not a prerequisite for using LETO in another region
-or a substitute for regional validation.
+The [Maine regression reference](baseline_validation.md) records the original
+test setup. Its counts apply only to that configuration.

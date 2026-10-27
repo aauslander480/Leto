@@ -4,24 +4,20 @@
 
 ## Small-stand behavior
 
-Choose `small_stands["remaining_small_stand_action"]` for your analysis:
-`force_merge`, `retain`, `delete`, or `proximity_merge`. The supplied example
-uses `force_merge`; this is an example setting, not a requirement for other
-regions. Deletion must be intentional and its acreage impact reviewed.
+See [Configuration](configuration.md) for small-stand actions and settings.
 
-An optional `"proximity_merge"` mode groups eligible residual small segments
+The optional `"proximity_merge"` mode groups eligible residual small segments
 within the configured distance under one `MU_ID` without changing geometry or
 renumbering their original `SEG_ID` values. Its default candidate rules require
 matching ownership and dominant forest type, enforce the configured maximum
 combined acreage, and use a 60-meter search distance. Donor weights for grouped
 segments are combined by contributing acreage.
 
-
 ## Proximity-chain QA and final management-unit identity
 
 Proximity grouping has two identities: `BIO_MU_ID` is the biological grouping
-created by the unchanged proximity candidate algorithm, while final `MU_ID`
-is the routing-safe stand identity after riparian, wetland, ownership, management
+created by proximity grouping, while final `MU_ID`
+is the stand identity after riparian, wetland, ownership, management
 class, management type, and database-group compatibility is enforced.
 `SEG_ID` is immutable provenance and `MU_PART` is deterministic by original
 `SEG_ID` and source object ID.
@@ -30,11 +26,9 @@ Chain QA is calculated groupwise for each final MU. `MAX_PAIR_DIST_M` and
 `MU_SPAN_M` are the maximum shortest boundary-to-boundary separation among
 unique component pairs; `MAX_CENTROID_DIST_M` is reported separately.
 `CHAIN_FLAG` is true when span exceeds the configured proximity search
-distance, and `CHAIN_RATIO` is span divided by that distance. The groupwise
-implementation intentionally avoids a global all-pairs distance table.
+distance, and `CHAIN_RATIO` is span divided by that distance. Distances are calculated within each group.
 
-
-### Stage 2 and Stage 3 spatial contract
+## Spatial outputs and donor weights
 
 Stage 2 writes both `ManagementSegments_Final` and
 `ManagementUnits_Final`. The former remains singlepart and retains immutable
@@ -49,23 +43,20 @@ Stage 3 reads `ManagementUnits_Final` for its one-row-per-FVS-stand list and
 multiplied by contributing segment-piece acreage, divided by final MU acreage,
 and repeated `PLT_CN` donors are consolidated before exact normalization.
 
+## Imputation diagnostics
 
-## Diagnostic-only imputation QA
-
-Stage 1 preserves the existing FIA-first, TreeMap-RAT-fallback, and independent
-nearest-cell fill order. It writes
+Stage 1 uses FIA attributes first, then TreeMap raster attributes, then an
+independent nearest-cell fill for each variable. It writes
 `QA_STAGE1_Raster_Imputation_Summary.csv`,
 `QA_STAGE1_Landscape_Imputation_Summary.csv`, five optional
 `QA_<VARIABLE>_Source.tif` rasters, and
 `QA_Any_Nearest_Imputation.tif`. Nearest distances are measured from each
-filled cell to the exact donor indices already selected by the existing SciPy
-algorithm; calculating distance does not participate in donor selection.
+filled cell to the exact donor indices selected by SciPy; calculating distance does not participate in donor selection.
 
-Stage 4 preserves the configured donor threshold and geographic
-`GenerateNearTable` selection. It writes
+Stage 4 applies the configured donor threshold and uses `GenerateNearTable`
+for nearest-stand selection. It writes
 `QA_Imputation_Diagnostics.csv` with one row per imputed MU and
 `QA_Imputation_Summary.csv` with overall, failure-reason, distance-statistic,
 and distance-bin rows. A donor absent from all loaded FIA TREE files is reported
 as `MISSING_FIA_DONOR`; a present donor with no configured live-tree records is
-reported separately as `NO_LIVE_TREES`. Tree-data validity mirrors the
-existing usable-tree filter rather than introducing new exclusions.
+reported separately as `NO_LIVE_TREES`. Diagnostics use the same tree-validity rules as inventory preparation.

@@ -2,8 +2,8 @@
 
 ## Development checks without ArcGIS
 
-The package declares Python 3.9 or newer. These commands install the lightweight
-package and test dependencies; they do not install ArcPy or the full GIS runtime.
+The package declares Python 3.9 or newer. These commands install the package and test
+dependencies. Full spatial runs require the ArcGIS Pro environment.
 
 Windows PowerShell, from the repository root:
 
@@ -24,8 +24,8 @@ python3 -m venv .venv
 ```
 
 Passing unit tests does not validate an end-to-end spatial run. Read
-[AGENTS.md](AGENTS.md) before contributing; preserve reproducible regional configurations and document
-any intentional changes to scientific assumptions.
+[AGENTS.md](AGENTS.md) before contributing. Preserve reproducible regional
+configurations and document changes to scientific assumptions.
 
 When reporting a problem, include the failing stage, traceback, environment
 versions, relevant configuration with private paths removed, and available QA

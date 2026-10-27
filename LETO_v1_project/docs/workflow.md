@@ -12,8 +12,6 @@
 | 4 | Filter and renormalize donors, translate species, weight FIA trees, optionally impute missing tree lists | FVS stand/tree inventories, missing-species and imputation diagnostics |
 | 5 | Copy the blank FVS database and populate inventory tables | Grouped and/or combined SQLite databases |
 
-Stages 3–5 pass pandas DataFrames internally. CSVs remain audit outputs.
-
 ## Spatial identifiers
 
 - `SEG_ID` identifies original biological segments in the spatial outputs;
@@ -52,11 +50,9 @@ Each run creates a timestamped folder beneath `runs_root_folder`:
   08_Logs/
 ```
 
-The folder structure includes `08_Logs`; capture console/notebook output for
-tracebacks rather than assuming a persistent log file is written there.
-Final feature classes live in the configured **working geodatabase**, outside
-this folder unless you explicitly place the geodatabase there. Timestamped run
-folders do not preserve previous versions of those feature classes.
+Capture console or notebook output for tracebacks; `08_Logs` may contain no
+persistent log. Final feature classes are stored in the working geodatabase.
+Timestamped results folders do not preserve previous versions of those layers.
 
 | Location | Files / datasets to inspect |
 |---|---|
@@ -77,29 +73,21 @@ with its raster outputs. Stage 4 writes `QA_Imputation_Diagnostics.csv`,
 copies of the source datasets. Archive the source versions and environment
 information separately for reproducibility.
 
-## QA before FVS
+## Inventory assumptions
 
-1. Confirm the expected study footprint and acreage through segmentation and
-   management-unit finalization.
-2. Check donor weights sum to 1 per final unit. Filtering uses
-   `inventory.minimum_plot_weight`, retains at least the largest donor, and
-   renormalizes the retained weights.
-3. Review species exclusions and their weighted TPA impact. Height falls back
-   from `HT` to `ACTUALHT` when available.
-4. Review directly supported versus imputed acreage and donor distances.
-   Missing FIA donors and donors without live trees are separate failure reasons.
-5. Inspect stands still lacking trees. They can be excluded from the final
-   runnable inventory; a completion message does not mean all original units
-   received usable trees.
-6. Check unique stand IDs, tree coverage, and database row counts. In
-   `grouped` mode, group stand totals should match unique final stands.
-   In `both` mode, the combined database repeats the grouped inventory;
-   do not sum all database rows as unique stands.
+Donor filtering uses `inventory.minimum_plot_weight`, retains at least the
+largest donor, and renormalizes weights. Tree height falls back from `HT` to
+`ACTUALHT` when available.
 
-The supplied example's sampling design uses `TREE_COUNT` as weighted trees per acre,
-with basal area factor -1, plot size 1, breakpoint DBH 0, one plot, and zero
-nonstockable plots. Keep these assumptions consistent with the selected FVS
-template and workflow.
+Units without usable trees may be excluded from the runnable inventory.
+Review `Segment_FVS_Stands_No_Live_Trees.csv` even when processing completes.
 
-Use the [validation guide](validation.md) to establish acceptance criteria
-for your study area and compare repeat runs with the same inputs and settings.
+The example uses weighted trees per acre for `TREE_COUNT`, with basal area
+factor -1, plot size 1, breakpoint DBH 0, one plot, and zero nonstockable plots.
+Keep sampling design consistent with your FVS template.
+
+In `grouped` mode, group stand totals should match unique final stands.
+In `both` mode, the combined database repeats the grouped inventory.
+
+Follow [Validation](validation.md) to review coverage, weights, species,
+imputation, and database integrity before using the results.
