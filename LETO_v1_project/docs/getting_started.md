@@ -34,6 +34,9 @@ package install. Prepare the Pro environment above, then continue with your data
 
 ## 2. Gather the inputs
 
+Use [Input data and downloads](input_data.md) for official source links,
+which products to download, and FVS template compatibility notes.
+
 Large inputs are not included. Obtain the relevant products from their
 publishers (US Forest Service for TreeMap, FIA, and FVS; the ownership raster's
 publisher; USGS for NHD; and US Fish and Wildlife Service for NWI). The example

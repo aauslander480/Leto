@@ -22,7 +22,8 @@ You will need:
 - A species translation workbook and compatible blank FVS SQLite database.
 - Ownership, hydrography, and wetland data for the options you enable.
 
-Input data are supplied separately. LETO prepares inventories; running FVS
+Input data are supplied separately; see the
+[download directory](LETO_v1_project/docs/input_data.md) for sources and file choices. LETO prepares inventories; running FVS
 simulations is a separate step. There is no graphical setup wizard or bundled
 sample-data run.
 
@@ -67,6 +68,7 @@ Always pass your configuration explicitly.
 
 | Your task | Guide |
 |---|---|
+| Find and download input datasets | [Input data and downloads](LETO_v1_project/docs/input_data.md) |
 | Install prerequisites and prepare input data | [Getting started](LETO_v1_project/docs/getting_started.md) |
 | Choose settings for your landscape | [Configuration](LETO_v1_project/docs/configuration.md) |
 | Locate maps, inventories, databases, and QA reports | [Workflow and outputs](LETO_v1_project/docs/workflow.md) |
