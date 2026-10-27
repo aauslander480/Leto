@@ -3,7 +3,11 @@
 [Repository overview](../../README.md) · [Workflow and outputs](workflow.md) ·
 [Troubleshooting](troubleshooting.md)
 
-## 1. Prepare the environment
+## 1. Get LETO and prepare the environment
+
+Clone the repository or download it with GitHub's **Code → Download ZIP** and
+extract the full archive. Open the `LETO_v1_project` folder; this contains
+`run_leto.py`, `configs`, and the user guides.
 
 Use a licensed ArcGIS Pro installation on Windows for a full run. Select or
 clone an ArcGIS Pro Python environment through Pro's environment manager and
@@ -26,12 +30,7 @@ The repository does not pin a tested ArcGIS Pro version or provide a complete
 locked GIS environment. Record your Pro and dependency versions with your run.
 
 Running `run_leto.py` from the project folder does not require an editable
-package install. For development there, use:
-
-```bat
-python -m pip install -e ".[dev]"
-python -m pytest
-```
+package install. Prepare the Pro environment above, then continue with your data.
 
 ## 2. Gather the inputs
 
@@ -74,7 +73,8 @@ chosen variant; the column name alone does not establish compatibility.
 
 From `LETO_v1_project`, copy `configs/maine_test.py` to
 `configs/my_region.py`. This file is a complete regional example, not a
-universal set of modeling assumptions. Edit the copy's `CONFIG` dictionary:
+universal set of modeling assumptions. Use the [configuration guide](configuration.md)
+to review the copy's `CONFIG` dictionary:
 
 1. Replace every input path, `working_gdb`, and `runs_root_folder`.
    Use absolute paths and Python raw strings such as `r"D:\LETO_Data\study.gdb\Boundary"`.

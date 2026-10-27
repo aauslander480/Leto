@@ -1,107 +1,95 @@
 # LETO
 
-LETO prepares forest landscape units and weighted Forest Vegetation Simulator
-(FVS) inventories from TreeMap and Forest Inventory and Analysis (FIA) data.
-It uses ArcGIS Pro/ArcPy for spatial processing and writes stand/tree CSVs,
-QA reports, and FVS-ready SQLite databases.
+Turn TreeMap and Forest Inventory and Analysis (FIA) data into mapped forest
+management units and weighted Forest Vegetation Simulator (FVS) inventories
+for your study area.
 
-## What it does
+LETO brings landscape segmentation, donor-plot weighting, inventory preparation,
+and quality checks into one configurable workflow. Your outputs include GIS
+feature classes, stand and tree CSV files, and FVS-ready SQLite databases.
 
-1. Builds aligned rasters for forest type, age, basal area, quadratic mean
-   diameter, and trees per acre.
-2. Segments the landscape and creates management units with configured
-   ownership, riparian, and wetland rules.
-3. Calculates management-unit-to-FIA-plot donor weights.
-4. Builds weighted tree lists, with optional nearest-stand imputation.
-5. Writes databases grouped by management/ownership routing, combined, or both.
+## Is LETO a fit for your project?
 
-LETO prepares FVS inputs; the active pipeline does **not** run FVS simulations
-or join simulation results back to maps.
+LETO is intended for forest analysts and researchers who work with ArcGIS Pro,
+TreeMap/FIA data, and FVS. You should be comfortable preparing GIS datasets,
+editing a Python configuration file, and reviewing inventory assumptions.
 
-## Before you start
+You will need:
 
-- Full spatial runs require Windows and a licensed ArcGIS Pro Python
-  environment with ArcPy, NumPy, pandas, and SciPy.
-- Input datasets, an FIA-to-FVS species crosswalk workbook, and a compatible
-  blank FVS SQLite database must be supplied separately.
-- Configure LETO for your study area, source datasets, and FVS variant.
-  The included regional example contains local paths that must be replaced.
-- This research workflow requires user-supplied data and regional validation;
-  no sample-data demo is bundled.
+- Windows with a licensed ArcGIS Pro Python environment.
+- A study boundary and TreeMap raster with its donor-plot lookup attributes.
+- FIA TREE and COND exports covering the donor plots in your landscape.
+- A species translation workbook and compatible blank FVS SQLite database.
+- Ownership, hydrography, and wetland data for the options you enable.
 
-## Get started
+Input data are supplied separately. LETO prepares inventories; running FVS
+simulations is a separate step. There is no graphical setup wizard or bundled
+sample-data run.
 
-Clone the repository using a GitHub account that has access:
+## Start with your own study area
+
+1. **Get the source.** Clone the repository or use GitHub's **Code → Download
+   ZIP** and extract the complete archive.
+2. **Prepare your environment and inputs.** Follow the
+   [getting-started guide](LETO_v1_project/docs/getting_started.md).
+3. **Create your configuration.** Copy the supplied regional example, replace
+   paths, and review the [configuration choices](LETO_v1_project/docs/configuration.md).
+4. **Run a small study area first.** From an ArcGIS Pro Python Command Prompt,
+   run the command below.
+5. **Review your results.** Check spatial coverage, species translation, donor
+   weights, and imputation before using the FVS databases.
+
+To clone with Git:
 
 ```powershell
 git clone https://github.com/aauslander480/Leto.git
 cd Leto
 git switch main
-cd LETO_v1_project
+```
+
+From the downloaded repository's `LETO_v1_project` folder, in PowerShell:
+
+```powershell
 Copy-Item configs\maine_test.py configs\my_region.py
 ```
 
-Edit `configs/my_region.py`, then use an **ArcGIS Pro Python Command Prompt**
-with your prepared environment:
+The source file is a regional example. Replace its paths and review all
+modeling settings for your project before running:
 
 ```bat
 python run_leto.py configs\my_region.py
 ```
 
-Follow the [setup and input-data guide](LETO_v1_project/docs/getting_started.md)
-before this command. It covers environment checks, required inputs, notebook
-execution, configuration, and the first-run review.
+You can also [run from an ArcGIS Pro notebook](LETO_v1_project/docs/getting_started.md).
+Always pass your configuration explicitly.
 
-## Documentation
+## Find what you need
 
-| Guide | Contents |
+| Your task | Guide |
 |---|---|
-| [Getting started](LETO_v1_project/docs/getting_started.md) | Environment, inputs, configuration, and running |
-| [Workflow and outputs](LETO_v1_project/docs/workflow.md) | Five stages, identifiers, output locations, and QA |
-| [Validation](LETO_v1_project/docs/validation.md) | Regional acceptance checks and reproducibility |
-| [Advanced behavior](LETO_v1_project/README.md) | Proximity grouping, spatial contract, and imputation diagnostics |
-| [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) | Common setup, data, and run failures |
+| Install prerequisites and prepare input data | [Getting started](LETO_v1_project/docs/getting_started.md) |
+| Choose settings for your landscape | [Configuration](LETO_v1_project/docs/configuration.md) |
+| Locate maps, inventories, databases, and QA reports | [Workflow and outputs](LETO_v1_project/docs/workflow.md) |
+| Decide whether results are suitable for your analysis | [Validation](LETO_v1_project/docs/validation.md) |
+| Resolve an error or unexpected result | [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) |
+| Understand grouping and imputation in detail | [Advanced behavior](LETO_v1_project/docs/advanced_behavior.md) |
 
-## Repository layout
+## What to expect after a run
 
-```text
-LETO_v1_project/          Active implementation
-  run_leto.py            One-region pipeline entry point
-  configs/               Regional configuration example
-  leto/                  Configuration, stages, orchestration, and QA
-  tests/                 Unit tests that do not require ArcGIS
-  docs/                  User guides and validation notes
-scripts/                 Legacy/reference scripts; separate from the v1 entry point
-AGENTS.md                Scientific integrity and development rules
-```
+The console prints a timestamped results folder containing your configuration,
+run summaries, inventory CSVs, databases, and QA reports. Final spatial layers
+are written to your configured working geodatabase. Open
+`ManagementUnits_Final` in ArcGIS Pro to inspect the management units and
+review `Run_Summary.txt` alongside the QA reports.
 
-## Development checks without ArcGIS
+Each region needs its own data and settings. A successful run still requires
+review of acreage, donor coverage, species losses, and imputed inventories.
 
-The package declares Python 3.9 or newer. These commands install the lightweight
-package and test dependencies; they do not install ArcPy or the full GIS runtime.
+## Questions and problems
 
-Windows PowerShell, from the repository root:
+Check the [troubleshooting guide](LETO_v1_project/docs/troubleshooting.md) first.
+If you still need help, [open an issue](https://github.com/aauslander480/Leto/issues)
+with what you tried, what you expected, the traceback, environment versions,
+and relevant QA summaries. Remove private paths and data before posting.
 
-```powershell
-cd LETO_v1_project
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest
-```
-
-macOS/Linux, for the unit tests:
-
-```bash
-cd LETO_v1_project
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[dev]'
-.venv/bin/python -m pytest
-```
-
-Passing unit tests does not validate an end-to-end spatial run. Read
-[AGENTS.md](AGENTS.md) before contributing; preserve reproducible regional configurations and document
-any intentional changes to scientific assumptions.
-
-When reporting a problem, include the failing stage, traceback, environment
-versions, relevant configuration with private paths removed, and available QA
-summaries. Do not attach large source datasets.
+For code changes and local test setup, see [Contributing](CONTRIBUTING.md).
