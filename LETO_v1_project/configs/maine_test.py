@@ -1,39 +1,34 @@
 """Verified Maine test-area configuration.
 
-Edit paths here. The LETO source files should not need path edits.
+Replace all C:\\path\\to placeholders with your local paths before running.
+The LETO source files should not need path edits.
 """
 
 CONFIG = {
     "region_id": "ME",
     "run_name": "Maine_LETO_Baseline",
-    "working_gdb": (
-        r"C:\Users\aca28742\OneDrive - University of Georgia\Documents"
-        r"\ArcGIS\Projects\Unified_leto_test\Unified_leto_test.gdb"
-    ),
-    "runs_root_folder": r"D:\Misc\Unified_Leto_test(ME)",
+    "working_gdb": r"C:\path\to\working.gdb",
+    "runs_root_folder": r"C:\path\to\LETO_Runs",
 
-    "study_area": r"D:\Misc\Maine_5_co\Maine_5_co.gdb\ME_5_Co_Dissolve",
-    "treemap_raster": (
-        r"D:\Misc\Whole_treemap\RDS-2025-0032 (1)"
-        r"\Data\TreeMap2022_CONUS.tif"
-    ),
+    "study_area": r"C:\path\to\study_area.gdb\StudyBoundary",
+    "treemap_raster": r"C:\path\to\TreeMap2022_CONUS.tif",
 
     "fia_tree_files": [
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\MA_TREE.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\ME_TREE.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\NH_TREE.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Tree\NY_TREE.csv",
+        r"C:\path\to\FIA\MA_TREE.csv",
+        r"C:\path\to\FIA\ME_TREE.csv",
+        r"C:\path\to\FIA\NH_TREE.csv",
+        r"C:\path\to\FIA\NY_TREE.csv",
     ],
     "fia_cond_files": [
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Cond\MA_COND.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Cond\ME_COND.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Cond\NH_COND.csv",
-        r"D:\Misc\Maine_5_co\ME_FVS_files\FIA_Cond\NY_COND.csv",
+        r"C:\path\to\FIA\MA_COND.csv",
+        r"C:\path\to\FIA\ME_COND.csv",
+        r"C:\path\to\FIA\NH_COND.csv",
+        r"C:\path\to\FIA\NY_COND.csv",
     ],
 
-    "species_crosswalk": r"D:\forest_condition_2026\FVS\FVS_SpeciesCrosswalk.xls",
+    "species_crosswalk": r"C:\path\to\FVS_SpeciesCrosswalk.xls",
     "species_crosswalk_sheet": "EasternSpeciesTranslator",
-    "blank_fvs_database": r"D:\forest_condition_2026\FVS\FVS_Data.db",
+    "blank_fvs_database": r"C:\path\to\FVS_Data.db",
     "fvs_variant": "NE",
     "fvs_state": "ME",
     "fvs_state_code": 23,
@@ -42,10 +37,7 @@ CONFIG = {
 
     "use_ownership_attributes": True,
     "use_ownership_hard_boundaries": True,
-    "ownership_source_raster": (
-        r"D:\forest_condition_2026\Stand_delineation"
-        r"\RDS-2025-0045 (1)\Data\US_forest_ownership.tif"
-    ),
+    "ownership_source_raster": r"C:\path\to\US_forest_ownership.tif",
     "collapse_nonforest_and_water": True,
 
     # Regional scientific assumptions used to derive segmentation rasters.
@@ -162,21 +154,9 @@ CONFIG = {
             "riparian": 1,
             "wetland": 2,
         },
-        "nhd_flowline": (
-            r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-            r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-            r"\NetworkNHDFlowline"
-        ),
-        "nhd_area": (
-            r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-            r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-            r"\NHDArea"
-        ),
-        "nhd_waterbody": (
-            r"D:\Misc\Stream_buffer_data\NHDPlus_H_National_Release_2_GDB"
-            r"\NHDPlus_H_National_Release_2_GDB.gdb\NHDPlus_H_National"
-            r"\NHDWaterbody"
-        ),
+        "nhd_flowline": r"C:\path\to\hydrography.gdb\NHDPlus_H_National\NetworkNHDFlowline",
+        "nhd_area": r"C:\path\to\hydrography.gdb\NHDPlus_H_National\NHDArea",
+        "nhd_waterbody": r"C:\path\to\hydrography.gdb\NHDPlus_H_National\NHDWaterbody",
     },
 
     "inventory": {
