@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .config import RunConfig
+from .donor_weights import filter_weights as _filter_weights
 from .logging_utils import StageTiming, message, timed_stage
 from .workspace import create_run_paths, ensure_working_gdb
 from . import stage1_rasters as s1
@@ -77,29 +78,6 @@ def _ensure_management_units(segment_polygons: str, output_fc: str) -> str:
             cursor.updateRow(row)
     return output_fc
 
-
-def _filter_weights(weights: pd.DataFrame, minimum_weight: float) -> pd.DataFrame:
-    weights = weights.copy()
-    weights["WEIGHT_ORIGINAL"] = pd.to_numeric(weights["WEIGHT"], errors="coerce")
-    weights = weights.dropna(
-        subset=["SEG_ID", "STAND_ID", "PLT_CN", "WEIGHT_ORIGINAL"]
-    )
-    weights = weights[weights["WEIGHT_ORIGINAL"] > 0].copy()
-    retained = weights[weights["WEIGHT_ORIGINAL"] >= minimum_weight].copy()
-    lost = set(weights["SEG_ID"]) - set(retained["SEG_ID"])
-    if lost:
-        largest = (
-            weights[weights["SEG_ID"].isin(lost)]
-            .sort_values(["SEG_ID", "WEIGHT_ORIGINAL"], ascending=[True, False])
-            .drop_duplicates("SEG_ID")
-        )
-        retained = pd.concat([retained, largest], ignore_index=True)
-    retained["WEIGHT"] = retained["WEIGHT_ORIGINAL"] / retained.groupby(
-        "SEG_ID"
-    )["WEIGHT_ORIGINAL"].transform("sum")
-    return retained.sort_values(
-        ["SEG_ID", "WEIGHT"], ascending=[True, False]
-    ).reset_index(drop=True)
 
 
 def _prepare_stands_dataframe(stands: pd.DataFrame, config: RunConfig) -> pd.DataFrame:
