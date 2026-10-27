@@ -61,8 +61,8 @@ provide fallbacks when FIA-derived attributes are missing. A clipped raster
 without its original lookup attributes is not a replacement for that table.
 
 Include FIA files covering the **TreeMap donor plots**, which can extend beyond
-the study area's state. The Maine example loads Massachusetts, Maine, New
-Hampshire, and New York. Preserve control numbers as text; opening and resaving
+the study area's state. Select source files based on donor coverage rather
+than administrative boundaries alone. Preserve control numbers as text; opening and resaving
 them through a spreadsheet can lose identifier precision.
 
 The example crosswalk expects sheet `EasternSpeciesTranslator`, an FIA column
@@ -73,8 +73,8 @@ chosen variant; the column name alone does not establish compatibility.
 ## 3. Create a regional configuration
 
 From `LETO_v1_project`, copy `configs/maine_test.py` to
-`configs/my_region.py`. Keep the original for baseline comparison. Edit the
-copy's `CONFIG` dictionary:
+`configs/my_region.py`. This file is a complete regional example, not a
+universal set of modeling assumptions. Edit the copy's `CONFIG` dictionary:
 
 1. Replace every input path, `working_gdb`, and `runs_root_folder`.
    Use absolute paths and Python raw strings such as `r"D:\LETO_Data\study.gdb\Boundary"`.
@@ -102,10 +102,10 @@ fixed names inside `working_gdb` and may be overwritten. Copy any spatial
 outputs you need to retain before reusing that geodatabase. Run regions
 sequentially with separate workspaces.
 
-For Maine baseline reproduction, keep
-`small_stands["remaining_small_stand_action"] = "force_merge"` and the
-original scientific settings. New areas should not be expected to match Maine
-counts. The optional `proximity_merge` setting needs separate validation.
+Select small-stand handling for your objectives and document the choice.
+Validate each regional setup using the [validation guide](validation.md),
+including acreage impacts, donor coverage, and any proximity grouping.
+Expected counts depend on your study area, inputs, and settings.
 
 ## 4. Run one region
 

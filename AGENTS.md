@@ -4,14 +4,17 @@
 
 This repository contains LETO, a forest landscape segmentation and FVS inventory-generation workflow.
 
-Codex and other coding agents must treat the verified Maine baseline as the source of truth unless a task explicitly requests a scientific change.
+LETO serves independently configured study areas. Preserve scientific behavior
+and reproducible regional reference runs unless a task explicitly requests a
+scientific change. The historical Maine setup is one regression example, not
+the source of modeling assumptions for every region.
 
 ## General Development Rules
 
-1. Read this file, `README.md`, and `docs/baseline_validation.md` before editing code.
+1. Read this file, `README.md`, and `LETO_v1_project/docs/validation.md` before editing code.
 2. Preserve scientific behavior unless the task explicitly requests a scientific change.
 3. Make one substantive feature change at a time.
-4. Keep the verified baseline reproducible through configuration.
+4. Keep accepted regional reference runs reproducible through configuration.
 5. Never remove or overwrite a known-good workflow without preserving a rollback path.
 6. Prefer small, reviewable commits with clear messages.
 7. Do not silently alter thresholds, weights, classifications, state codes, species mappings, buffer distances, donor logic, or FVS sampling assumptions.
@@ -146,7 +149,7 @@ When proximity merging is implemented:
 
 - It must be optional.
 - Existing actions such as `force_merge`, `retain`, and `delete` must continue to work unchanged.
-- The default baseline configuration must remain reproducible.
+- Existing regional configurations must remain reproducible.
 - Candidate units do not need to touch physically.
 - Do not alter geometry to fill gaps.
 - Preserve original `SEG_ID` values.
@@ -168,7 +171,7 @@ At minimum, maintain tests for:
 - Stand/tree referential integrity
 - Unique tree IDs within stands
 - FVS database schema and row counts
-- Baseline mode preserving verified Maine outputs where practical
+- Regression checks preserving accepted regional outputs where practical
 
 Scientific feature changes must include focused tests for the new behavior.
 
@@ -198,14 +201,14 @@ Before editing:
 
 1. Inspect the relevant modules and tests.
 2. State which scientific behavior, if any, will change.
-3. Identify baseline outputs that should remain unchanged.
+3. Identify regional reference outputs that should remain unchanged.
 
 After editing:
 
 1. Run focused unit tests.
 2. Run import and syntax checks.
-3. Run the Maine baseline when ArcPy and source data are available.
-4. Compare outputs with the verified baseline.
+3. Run relevant regional reference cases when ArcPy and source data are available.
+4. Compare outputs with accepted regional reference runs.
 5. Summarize changed files, behavior, tests, and any unresolved risks.
 
 ## Commit Guidance
@@ -215,7 +218,7 @@ Use descriptive commits, for example:
 - `Move riparian buffer rules into regional configuration`
 - `Add validation for donor weight normalization`
 - `Implement optional 60 m proximity grouping`
-- `Preserve baseline small-stand handling`
+- `Preserve configured small-stand handling`
 
 Do not combine unrelated refactors and scientific changes in one commit.
 
@@ -223,7 +226,7 @@ Do not combine unrelated refactors and scientific changes in one commit.
 
 The current development priority is:
 
-1. Preserve the verified baseline.
+1. Support configurable regional workflows and preserve scientific integrity.
 2. Keep all modeling assumptions in configuration.
-3. Add the optional proximity-merge feature as an isolated, testable change.
+3. Maintain optional scientific features as isolated, testable changes.
 4. Maintain independent multi-region scalability.

@@ -16,7 +16,7 @@
 | Geodatabase locks or overwritten spatial outputs | Close layers holding locks, use a dedicated working geodatabase, and avoid concurrent runs against it. Archive prior spatial results. |
 | No runnable stands for nearest imputation | Check FIA coverage, live-tree records, retained donors, and species translation. Nearest imputation needs at least one valid donor stand. |
 | SQLite missing table / column errors | Supply a compatible blank FVS SQLite template with the expected inventory schema; a new empty SQLite file is insufficient. |
-| Results differ from Maine counts | Those counts apply to the original inputs and scientific settings. Confirm baseline `force_merge` mode, then compare acreage, weights, and database contents. |
+| Unexpected counts or acreage | Compare against your study footprint and a previously accepted run with the same input versions and settings. Review segmentation, donor coverage, and imputation QA using the [validation guide](validation.md). |
 
 A failed run may leave partial output files and intermediate geodatabase
 datasets. Root-level run summaries are written at the end, so their absence

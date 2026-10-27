@@ -1,6 +1,6 @@
 # Workflow and outputs
 
-[Getting started](getting_started.md) · [Maine baseline](baseline_validation.md)
+[Getting started](getting_started.md) · [Validation](validation.md)
 
 ## Five stages
 
@@ -96,11 +96,10 @@ information separately for reproducibility.
    In `both` mode, the combined database repeats the grouped inventory;
    do not sum all database rows as unique stands.
 
-The baseline sampling design uses `TREE_COUNT` as weighted trees per acre,
+The supplied example's sampling design uses `TREE_COUNT` as weighted trees per acre,
 with basal area factor -1, plot size 1, breakpoint DBH 0, one plot, and zero
 nonstockable plots. Keep these assumptions consistent with the selected FVS
 template and workflow.
 
-Compare the original Maine setup against the
-[baseline reference](baseline_validation.md). Optional proximity grouping and
-new regions require separate QA; reference counts are not universal targets.
+Use the [validation guide](validation.md) to establish acceptance criteria
+for your study area and compare repeat runs with the same inputs and settings.

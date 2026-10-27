@@ -1,19 +1,14 @@
-# LETO v1.0 Baseline Project
+# LETO v1.0
 
-This project reorganizes the verified unified LETO pipeline into a maintainable one-region software structure **without intentionally changing the scientific algorithms**.
+LETO is a configurable forest landscape segmentation and FVS inventory
+preparation workflow. Use one regional configuration per study area to select
+source data, segmentation settings, management rules, and FVS metadata.
 
-## First objective
+## Regional workflow
 
-Run the same Maine test area and compare it with the verified baseline:
-
-- 429,977 valid raster cells
-- 12,168 parent segments
-- 19,662 final management-unit polygon records
-- 19,244 direct FVS stands
-- 418 nearest-imputed stands
-- 6 grouped FVS databases
-
-Small numerical or ordering differences should be investigated before adding new algorithms.
+Prepare your data, configure an isolated workspace, run the five stages, and
+review spatial and inventory QA before using the resulting FVS databases.
+See the [validation guide](docs/validation.md) for acceptance checks.
 
 ## Folder structure
 
@@ -49,16 +44,18 @@ and copy/edit a regional configuration as described in the setup guide. Then run
 ```
 
 Edit paths and region-specific settings in your copied configuration; preserve
-`configs/maine_test.py` as the baseline reference.
+the supplied example as a reference.
 
-## Running another area
+## Configuring a study area
 
 Copy `configs/maine_test.py`, rename it, and change its source paths and FVS metadata. The LETO package should remain unchanged.
 
 ## Small-stand behavior
 
-The verified baseline continues to use
-`small_stands["remaining_small_stand_action"] = "force_merge"`.
+Choose `small_stands["remaining_small_stand_action"]` for your analysis:
+`force_merge`, `retain`, `delete`, or `proximity_merge`. The supplied example
+uses `force_merge`; this is an example setting, not a requirement for other
+regions. Deletion must be intentional and its acreage impact reviewed.
 
 An optional `"proximity_merge"` mode groups eligible residual small segments
 within the configured distance under one `MU_ID` without changing geometry or

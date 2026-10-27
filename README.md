@@ -24,10 +24,10 @@ or join simulation results back to maps.
   environment with ArcPy, NumPy, pandas, and SciPy.
 - Input datasets, an FIA-to-FVS species crosswalk workbook, and a compatible
   blank FVS SQLite database must be supplied separately.
-- The included Maine configuration contains the original author's local
-  paths. Copy it and replace those paths before running.
-- This is a research workflow with a documented Maine baseline, not a bundled
-  sample-data demo. Other regions and optional settings need their own QA.
+- Configure LETO for your study area, source datasets, and FVS variant.
+  The included regional example contains local paths that must be replaced.
+- This research workflow requires user-supplied data and regional validation;
+  no sample-data demo is bundled.
 
 ## Get started
 
@@ -58,7 +58,7 @@ execution, configuration, and the first-run review.
 |---|---|
 | [Getting started](LETO_v1_project/docs/getting_started.md) | Environment, inputs, configuration, and running |
 | [Workflow and outputs](LETO_v1_project/docs/workflow.md) | Five stages, identifiers, output locations, and QA |
-| [Maine baseline validation](LETO_v1_project/docs/baseline_validation.md) | Reference counts and comparison requirements |
+| [Validation](LETO_v1_project/docs/validation.md) | Regional acceptance checks and reproducibility |
 | [Advanced behavior](LETO_v1_project/README.md) | Proximity grouping, spatial contract, and imputation diagnostics |
 | [Troubleshooting](LETO_v1_project/docs/troubleshooting.md) | Common setup, data, and run failures |
 
@@ -67,10 +67,10 @@ execution, configuration, and the first-run review.
 ```text
 LETO_v1_project/          Active implementation
   run_leto.py            One-region pipeline entry point
-  configs/               Regional configuration and baseline reference
+  configs/               Regional configuration example
   leto/                  Configuration, stages, orchestration, and QA
   tests/                 Unit tests that do not require ArcGIS
-  docs/                  User guides and baseline notes
+  docs/                  User guides and validation notes
 scripts/                 Legacy/reference scripts; separate from the v1 entry point
 AGENTS.md                Scientific integrity and development rules
 ```
@@ -99,7 +99,7 @@ python3 -m venv .venv
 ```
 
 Passing unit tests does not validate an end-to-end spatial run. Read
-[AGENTS.md](AGENTS.md) before contributing; preserve the baseline and document
+[AGENTS.md](AGENTS.md) before contributing; preserve reproducible regional configurations and document
 any intentional changes to scientific assumptions.
 
 When reporting a problem, include the failing stage, traceback, environment
