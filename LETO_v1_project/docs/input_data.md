@@ -17,7 +17,7 @@ large archives and the FVS installer were not downloaded or tested with LETO.
 | FIA TREE CSVs | [FIA DataMart](https://apps.fs.usda.gov/fia/datamart/datamart.html); [agency overview and user-guide links](https://research.fs.usda.gov/products/dataandtools/fia-datamart) | Choose raw CSV tables for the donor states and retain `<STATE>_TREE.csv`. Set `fia_tree_files`. |
 | FIA COND CSVs | [FIA DataMart](https://apps.fs.usda.gov/fia/datamart/datamart.html) | Retain `<STATE>_COND.csv` for the donor states. Set `fia_cond_files`. FVS-ready SQLite downloads are a different product from the raw CSVs used by these stages. |
 | FIA-to-FVS species crosswalk | [Official FVS user guides: Variant Overview Supplemental Information](https://www.fs.usda.gov/managing-land/forest-management/fvs/documents/guides); [FVS_SpeciesCrosswalk.xls workbook](https://www.fs.usda.gov/fmsc/ftp/fvs/docs/overviews/FVS_SpeciesCrosswalk.xls) | Download the Excel workbook, not the explanatory PDF. Set `species_crosswalk`, sheet, and configured FIA/FVS columns for your variant. |
-| Blank FVS SQLite template | [Official FVS Complete Package](https://www.fs.usda.gov/fvs/software/complete.php); [FVS software landing page](https://www.fs.usda.gov/managing-land/forest-management/fvs/software); [Database Extension guide](https://www.fs.usda.gov/sites/default/files/forest-management/fvs-dbs-user-guide.pdf) | Obtain a blank SQLite template through the FVS distribution or FVS support, then check its schema against LETO's requirements below. Set `blank_fvs_database`. |
+| Blank FVS SQLite template | [Included FVS_Data_Blank.db](../data/templates/FVS_Data_Blank.db) · [Download](https://github.com/aauslander480/Leto/raw/refs/heads/main/LETO_v1_project/data/templates/FVS_Data_Blank.db) | Set `blank_fvs_database` to the absolute path of your local copy. See the verification notes below. |
 
 ### TreeMap: keep the donor lookup
 
@@ -45,19 +45,31 @@ Inspect the workbook and select the column appropriate to your FVS variant
 through `inventory.species_crosswalk_fvs_columns`, along with the correct
 sheet. Review untranslated-species QA after running.
 
-### FVS template compatibility
+### Included FVS template
 
-The example's `FVS_Data.db` is a local file; a standalone download of that
-exact file has not been verified. Start with the Complete Package. If it lacks
-a suitable template, use support on the
-[FVS home page](https://www.fs.usda.gov/managing-land/forest-management/fvs).
+The repository includes `data/templates/FVS_Data_Blank.db`, prepared from a
+project-supplied FVS database. All four tables are empty, including
+`FVS_GroupAddFilesAndKeywords`; inventory records and filename-specific
+keyword configurations have been removed.
 
-LETO expects `FVS_StandInit`, `FVS_TreeInit`, and `FVS_PlotInit` tables
-and appends the columns produced by `leto/stage5_database.py`. Check all column
-names and types before using a template. The current FVS Database Extension
-guide notes that some control-number columns are absent from its standard
-blank template, while LETO writes control-number fields. Check compatibility before using the standard template. Do not create an empty `.db` file or
-rename an Access database to satisfy this input.
+The template passed SQLite integrity checks and sample inserts matching
+LETO's stand/tree output columns, including control-number fields. An FVS
+simulation has not been tested.
+
+After cloning or downloading the repository, set the configuration to your
+local template path, for example:
+
+```python
+"blank_fvs_database": r"C:\path\to\Leto\LETO_v1_project\data\templates\FVS_Data_Blank.db",
+```
+
+LETO copies this template for each output database. Configure simulation
+keywords and the input database path separately in your FVS workflow.
+
+For other templates, compare the schema with
+[`stage5_database.py`](../leto/stage5_database.py). Official references:
+[FVS Complete Package](https://www.fs.usda.gov/fvs/software/complete.php) and
+[Database Extension guide](https://www.fs.usda.gov/sites/default/files/forest-management/fvs-dbs-user-guide.pdf).
 
 ## Inputs required by enabled options
 
